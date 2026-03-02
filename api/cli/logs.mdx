@@ -1,0 +1,134 @@
+---
+title: convex logs
+description: Stream function execution logs from your Convex deployment in real-time
+---
+
+Stream function logs from your Convex deployment. By default, this streams from your project's dev deployment.
+
+## Usage
+
+```bash
+npx convex logs [options]
+```
+
+## Options
+
+<ParamField path="--history" type="number">
+  Show `n` most recent logs. Defaults to showing all available logs.
+
+  ```bash
+  npx convex logs --history 50
+  ```
+</ParamField>
+
+<ParamField path="--success" type="boolean">
+  Print a log line for every successful function execution. By default, only errors and console logs are shown.
+
+  ```bash
+  npx convex logs --success
+  ```
+</ParamField>
+
+<ParamField path="--jsonl" type="boolean">
+  Output raw log events as JSONL (JSON Lines) format for parsing with other tools.
+
+  ```bash
+  npx convex logs --jsonl > logs.jsonl
+  ```
+</ParamField>
+
+<ParamField path="--prod" type="boolean">
+  Watch logs from this project's production deployment instead of dev.
+
+  ```bash
+  npx convex logs --prod
+  ```
+</ParamField>
+
+<ParamField path="--env-file" type="string">
+  Path to a custom file of environment variables for choosing the deployment. Same format as `.env.local` or `.env` files, and overrides them.
+
+  ```bash
+  npx convex logs --env-file .env.staging
+  ```
+</ParamField>
+
+## Examples
+
+### Stream dev deployment logs
+
+Watch logs from your development deployment:
+
+```bash
+npx convex logs
+```
+
+### View recent production logs
+
+See the last 100 logs from production:
+
+```bash
+npx convex logs --prod --history 100
+```
+
+### Monitor all executions including successes
+
+Watch all function executions, including successful ones:
+
+```bash
+npx convex logs --success
+```
+
+### Export logs for analysis
+
+Output logs in JSONL format for processing:
+
+```bash
+npx convex logs --jsonl > app-logs.jsonl
+```
+
+### Debug production issues
+
+View recent production logs with full execution details:
+
+```bash
+npx convex logs --prod --history 200 --success
+```
+
+## Log output format
+
+By default, logs are displayed in a human-readable format showing:
+
+- Timestamp
+- Function name and type (query/mutation/action)
+- Execution status (success/error)
+- Console output from your functions
+- Error messages and stack traces
+
+With `--jsonl`, each log line is a JSON object containing structured data about the execution.
+
+## Common use cases
+
+### Development debugging
+
+Leave logs running while developing to see real-time feedback:
+
+```bash
+npx convex logs --success
+```
+
+### Production monitoring
+
+Monitor production errors in real-time:
+
+```bash
+npx convex logs --prod
+```
+
+### Log aggregation
+
+Collect logs for external analysis tools:
+
+```bash
+npx convex logs --jsonl --prod | your-log-processor
+```

@@ -367,3 +367,152 @@ function App() {
   );
 }
 ```
+
+## Custom auth integration
+
+### useConvexAuth
+
+Get the auth state within a React component when using a custom auth integration.
+
+```typescript
+import { useConvexAuth } from "convex/react";
+
+function ProfileButton() {
+  const { isLoading, isAuthenticated } = useConvexAuth();
+  
+  if (isLoading) {
+    return <div>Loading...</div>;
+  }
+  
+  if (isAuthenticated) {
+    return <button>My Profile</button>;
+  }
+  
+  return <button>Sign In</button>;
+}
+```
+
+This hook provides the current authentication state when using `ConvexProviderWithAuth` or a similar auth integration provider. It relies on an auth provider being above in the React component tree.
+
+**Returns:** A `ConvexAuthState` object containing:
+
+<ResponseField name="isLoading" type="boolean" required>
+  Whether the authentication state is currently being loaded. `true` when initially determining auth state or during transitions between auth contexts.
+</ResponseField>
+
+<ResponseField name="isAuthenticated" type="boolean" required>
+  Whether the user is currently authenticated with Convex. `true` only when both the auth provider reports authentication and Convex has successfully validated the token.
+</ResponseField>
+
+**Throws:** An error if not used under `ConvexProviderWithAuth` or a similar auth integration provider like `ConvexProviderWithClerk`.
+
+### ConvexAuthState
+
+Type representing the state of an auth integration with Convex.
+
+```typescript
+type ConvexAuthState = {
+  isLoading: boolean;
+  isAuthenticated: boolean;
+};
+```
+
+<ResponseField name="isLoading" type="boolean" required>
+  Whether the authentication state is currently being loaded.
+</ResponseField>
+
+<ResponseField name="isAuthenticated" type="boolean" required>
+  Whether the user is currently authenticated with Convex.
+</ResponseField>
+
+### ConvexProviderWithAuth
+
+A replacement for `ConvexProvider` that integrates any auth provider with Convex.
+
+```typescript
+import { ConvexProviderWithAuth, ConvexReactClient } from "convex/react";
+import { useAuth } from "@myauth/react";
+
+const convex = new ConvexReactClient(process.env.NEXT_PUBLIC_CONVEX_URL);
+
+function App() {
+  return (
+    <ConvexProviderWithAuth client={convex} useAuth={useAuth}>
+      <YourApp />
+    </ConvexProviderWithAuth>
+  );
+}
+```
+
+This component wraps `ConvexProvider` and additionally provides `ConvexAuthState` to descendant components. Use this to integrate any auth provider with Convex by passing a custom `useAuth` hook.
+
+If the `useAuth` hook updates (causing a rerender), the auth state will transition to loading and `fetchAccessToken()` will be called again. This enables dynamic auth context changes like switching organizations.
+
+See [Custom Auth Integration](https://docs.convex.dev/auth/advanced/custom-auth) for more information.
+
+<ParamField path="client" type="ConvexReactClient" required>
+  The ConvexReactClient instance to provide.
+</ParamField>
+
+<ParamField path="useAuth" type="() => AuthHookResult" required>
+  A React hook that returns the auth provider's state and token fetcher.
+  
+  <Expandable title="AuthHookResult properties">
+    <ParamField path="isLoading" type="boolean" required>
+      Whether the auth provider is currently loading auth state.
+    </ParamField>
+    
+    <ParamField path="isAuthenticated" type="boolean" required>
+      Whether the auth provider reports the user as authenticated.
+    </ParamField>
+    
+    <ParamField path="fetchAccessToken" type="(args: { forceRefreshToken: boolean }) => Promise<string | null>" required>
+      Function to fetch a JWT access token from the auth provider. Should return `null` if the user is not authenticated.
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+<ParamField path="children" type="ReactNode">
+  Child components that can use Convex hooks and `useConvexAuth()`.
+</ParamField>
+
+#### Example with custom auth provider
+
+```typescript
+import { ConvexProviderWithAuth } from "convex/react";
+import { useAuth0 } from "@auth0/auth0-react";
+
+function useAuth() {
+  const {
+    isLoading,
+    isAuthenticated,
+    getAccessTokenSilently,
+  } = useAuth0();
+  
+  const fetchAccessToken = async ({ forceRefreshToken }) => {
+    try {
+      return await getAccessTokenSilently({
+        cacheMode: forceRefreshToken ? "off" : "on",
+      });
+    } catch {
+      return null;
+    }
+  };
+  
+  return {
+    isLoading,
+    isAuthenticated: isAuthenticated ?? false,
+    fetchAccessToken,
+  };
+}
+
+function App() {
+  return (
+    <Auth0Provider domain="..." clientId="...">
+      <ConvexProviderWithAuth client={convex} useAuth={useAuth}>
+        <YourApp />
+      </ConvexProviderWithAuth>
+    </Auth0Provider>
+  );
+}
+```

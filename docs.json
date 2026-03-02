@@ -91,6 +91,7 @@
               "api/server/queries",
               "api/server/mutations",
               "api/server/actions",
+              "api/server/http-actions",
               "api/server/database",
               "api/server/schema",
               "api/server/authentication",
@@ -114,7 +115,10 @@
               "api/cli/deploy",
               "api/cli/import-export",
               "api/cli/env",
-              "api/cli/data"
+              "api/cli/data",
+              "api/cli/logs",
+              "api/cli/run",
+              "api/cli/login-logout"
             ]
           },
           {

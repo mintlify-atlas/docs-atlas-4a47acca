@@ -1,0 +1,512 @@
+---
+title: HTTP actions
+description: API reference for HTTP routing in Convex
+---
+
+HTTP actions allow you to build HTTP endpoints that execute Convex functions. They are registered using the `httpRouter()` and routed to specific paths and HTTP methods.
+
+## httpRouter
+
+Create a new HTTP router instance for defining HTTP routes.
+
+```typescript
+import { httpRouter } from "convex/server";
+
+const http = httpRouter();
+
+export default http;
+```
+
+**Returns**: A new `HttpRouter` instance.
+
+## HttpRouter
+
+The HTTP router class for specifying paths and methods for HTTP actions.
+
+### route
+
+Register an HTTP action to respond to requests for a specific HTTP method and path or path prefix.
+
+```typescript
+http.route(spec: RouteSpec): void
+```
+
+<ParamField path="spec" type="RouteSpec" required>
+  A route specification object containing the method, handler, and either `path` or `pathPrefix`.
+</ParamField>
+
+#### Path routing
+
+Exact path matching requires the request URL to match exactly (excluding trailing slash).
+
+```typescript
+import { httpRouter } from "convex/server";
+import { httpAction } from "./_generated/server";
+import { api } from "./_generated/api";
+
+const http = httpRouter();
+
+// Matches /message exactly (but not /message/)
+http.route({
+  path: "/message",
+  method: "POST",
+  handler: httpAction(async ({ runMutation }, request) => {
+    const { author, body } = await request.json();
+    
+    await runMutation(api.sendMessage.default, { body, author });
+    return new Response(null, { status: 200 });
+  })
+});
+
+export default http;
+```
+
+**Requirements**:
+- Paths must begin with `/`
+- Cannot use both `path` and `pathPrefix` in the same route
+- Paths starting with `/.files/` or exactly `/.files` are reserved
+
+#### Path prefix routing
+
+Path prefix matching routes all requests with URLs starting with the specified prefix.
+
+```typescript
+import { httpRouter } from "convex/server";
+import { getProfile } from "./profiles";
+
+const http = httpRouter();
+
+// Matches /profiles/, /profiles/abc, /profiles/a/b/c
+// Does not match /profile or /profiles (without trailing slash)
+http.route({
+  pathPrefix: "/profiles/",
+  method: "GET",
+  handler: getProfile
+});
+
+export default http;
+```
+
+**Requirements**:
+- Path prefixes must begin with `/`
+- Path prefixes must end with `/`
+- Cannot use both `path` and `pathPrefix` in the same route
+- Path prefixes starting with `/.files/` are reserved
+
+### getRoutes
+
+Returns a list of all registered HTTP action routes.
+
+```typescript
+http.getRoutes(): Array<Readonly<[string, RoutableMethod, PublicHttpAction]>>
+```
+
+**Returns**: An array of tuples containing `[path, method, handler]`. Path prefixes are returned with a `*` suffix (e.g., `/api/*`).
+
+This method is used internally to populate the routes shown in the Convex dashboard Functions page.
+
+### lookup
+
+Find the appropriate HTTP action for a given path and method.
+
+```typescript
+http.lookup(
+  path: string,
+  method: RoutableMethod | "HEAD"
+): Readonly<[PublicHttpAction, RoutableMethod, string]> | null
+```
+
+<ParamField path="path" type="string" required>
+  The request URL pathname to look up.
+</ParamField>
+
+<ParamField path="method" type="RoutableMethod | 'HEAD'" required>
+  The HTTP method to look up.
+</ParamField>
+
+**Returns**: A tuple `[handler, method, routedPath]` if a match is found, or `null` if no route matches.
+
+For prefix routes, the returned path includes a `*` suffix.
+
+```typescript
+http.route({ 
+  pathPrefix: "/profile/", 
+  method: "GET", 
+  handler: getProfile
+});
+
+// Returns [getProfile, "GET", "/profile/*"]
+http.lookup("/profile/abc", "GET");
+```
+
+## HTTP methods
+
+### Supported methods
+
+The following HTTP methods are supported by Convex HTTP actions:
+
+- `GET`
+- `POST`
+- `PUT`
+- `DELETE`
+- `PATCH`
+- `OPTIONS`
+
+**Note**: `HEAD` requests are automatically handled by running the `GET` handler and stripping the response body.
+
+### Method routing example
+
+```typescript
+import { httpRouter } from "convex/server";
+import { httpAction } from "./_generated/server";
+
+const http = httpRouter();
+
+// Route different methods to the same path
+http.route({
+  path: "/api/resource",
+  method: "GET",
+  handler: httpAction(async (ctx, request) => {
+    return new Response(JSON.stringify({ data: "..." }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" }
+    });
+  })
+});
+
+http.route({
+  path: "/api/resource",
+  method: "POST",
+  handler: httpAction(async (ctx, request) => {
+    const body = await request.json();
+    // Process POST request...
+    return new Response(null, { status: 201 });
+  })
+});
+
+http.route({
+  path: "/api/resource",
+  method: "DELETE",
+  handler: httpAction(async (ctx, request) => {
+    // Process DELETE request...
+    return new Response(null, { status: 204 });
+  })
+});
+
+export default http;
+```
+
+## Types
+
+### RouteSpec
+
+A union type representing a route specification. Can be either `RouteSpecWithPath` or `RouteSpecWithPathPrefix`.
+
+```typescript
+type RouteSpec = RouteSpecWithPath | RouteSpecWithPathPrefix;
+```
+
+### RouteSpecWithPath
+
+A route specification using exact path matching.
+
+```typescript
+type RouteSpecWithPath = {
+  path: string;
+  method: RoutableMethod;
+  handler: PublicHttpAction;
+}
+```
+
+<ParamField path="path" type="string" required>
+  Exact HTTP request path to route. Must start with `/`.
+</ParamField>
+
+<ParamField path="method" type="RoutableMethod" required>
+  HTTP method to route (`"GET"`, `"POST"`, `"PUT"`, `"DELETE"`, `"PATCH"`, or `"OPTIONS"`).
+</ParamField>
+
+<ParamField path="handler" type="PublicHttpAction" required>
+  The HTTP action to execute when this route matches.
+</ParamField>
+
+### RouteSpecWithPathPrefix
+
+A route specification using path prefix matching.
+
+```typescript
+type RouteSpecWithPathPrefix = {
+  pathPrefix: string;
+  method: RoutableMethod;
+  handler: PublicHttpAction;
+}
+```
+
+<ParamField path="pathPrefix" type="string" required>
+  HTTP request path prefix to route. Requests with paths starting with this value will be routed to the handler. Must start and end with `/`.
+</ParamField>
+
+<ParamField path="method" type="RoutableMethod" required>
+  HTTP method to route (`"GET"`, `"POST"`, `"PUT"`, `"DELETE"`, `"PATCH"`, or `"OPTIONS"`).
+</ParamField>
+
+<ParamField path="handler" type="PublicHttpAction" required>
+  The HTTP action to execute when this route matches.
+</ParamField>
+
+### RoutableMethod
+
+Type representing the HTTP methods supported by Convex HTTP actions.
+
+```typescript
+type RoutableMethod = "GET" | "POST" | "PUT" | "DELETE" | "OPTIONS" | "PATCH";
+```
+
+### PublicHttpAction
+
+An HTTP action that is part of your app's public API. Created by wrapping a function with `httpAction()` from `_generated/server`.
+
+```typescript
+type PublicHttpAction = {
+  isHttp: true;
+  invokeHttpAction(request: Request): Promise<Response>;
+}
+```
+
+## Complete examples
+
+### Basic HTTP router
+
+```typescript
+// convex/http.ts
+import { httpRouter } from "convex/server";
+import { httpAction } from "./_generated/server";
+import { api } from "./_generated/api";
+
+const http = httpRouter();
+
+// POST endpoint for creating messages
+http.route({
+  path: "/postMessage",
+  method: "POST",
+  handler: httpAction(async ({ runMutation }, request) => {
+    const { author, body } = await request.json();
+    await runMutation(api.sendMessage.default, { body, author });
+    
+    return new Response(null, { status: 200 });
+  })
+});
+
+// GET endpoint with query parameters
+http.route({
+  path: "/getMessagesByAuthor",
+  method: "GET",
+  handler: httpAction(async ({ runQuery }, request) => {
+    const url = new URL(request.url);
+    const author = url.searchParams.get("author");
+    
+    const messages = await runQuery(api.messages.getByAuthor, { author });
+    
+    return new Response(JSON.stringify(messages), {
+      status: 200,
+      headers: { "Content-Type": "application/json" }
+    });
+  })
+});
+
+export default http;
+```
+
+### Path prefix routing
+
+```typescript
+// convex/http.ts
+import { httpRouter } from "convex/server";
+import { httpAction } from "./_generated/server";
+
+const http = httpRouter();
+
+// Matches /getAuthorMessages/User+123, /getAuthorMessages/User+234, etc.
+http.route({
+  pathPrefix: "/getAuthorMessages/",
+  method: "GET",
+  handler: httpAction(async ({ runQuery }, request) => {
+    const url = new URL(request.url);
+    const authorId = url.pathname.split("/getAuthorMessages/")[1];
+    
+    // Use authorId to fetch messages...
+    return new Response(JSON.stringify({ authorId }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" }
+    });
+  })
+});
+
+export default http;
+```
+
+### Handling file uploads with storage
+
+```typescript
+// convex/http.ts
+import { httpRouter } from "convex/server";
+import { httpAction } from "./_generated/server";
+import { api } from "./_generated/api";
+
+const http = httpRouter();
+
+http.route({
+  path: "/upload",
+  method: "POST",
+  handler: httpAction(async ({ storage, runMutation }, request) => {
+    // Store the uploaded file
+    const blob = await request.blob();
+    const storageId = await storage.store(blob);
+    
+    // Save metadata to database
+    const author = new URL(request.url).searchParams.get("author");
+    await runMutation(api.files.save, { storageId, author });
+    
+    return new Response(JSON.stringify({ storageId }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" }
+    });
+  })
+});
+
+http.route({
+  path: "/download",
+  method: "GET",
+  handler: httpAction(async ({ storage }, request) => {
+    const url = new URL(request.url);
+    const storageId = url.searchParams.get("storageId");
+    
+    const blob = await storage.get(storageId);
+    if (blob === null) {
+      return new Response("File not found", { status: 404 });
+    }
+    
+    return new Response(blob, {
+      headers: { "Content-Type": blob.type }
+    });
+  })
+});
+
+export default http;
+```
+
+### CORS handling
+
+```typescript
+// convex/http.ts
+import { httpRouter } from "convex/server";
+import { httpAction } from "./_generated/server";
+
+const http = httpRouter();
+
+// Handle CORS preflight requests
+http.route({
+  pathPrefix: "/",
+  method: "OPTIONS",
+  handler: httpAction(async (ctx, request) => {
+    const corsHeaders = {
+      "Access-Control-Allow-Origin": "https://example.com",
+      "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
+      "Access-Control-Allow-Headers": "Content-Type, Authorization",
+      "Access-Control-Max-Age": "86400"
+    };
+    
+    const headers = request.headers;
+    if (
+      headers.get("Origin") !== null &&
+      headers.get("Access-Control-Request-Method") !== null
+    ) {
+      // CORS preflight request
+      return new Response(null, { headers: corsHeaders });
+    }
+    
+    // Standard OPTIONS request
+    return new Response(null, {
+      headers: { "Allow": "GET, POST, PUT, DELETE, OPTIONS" }
+    });
+  })
+});
+
+// Add CORS headers to actual endpoints
+http.route({
+  path: "/api/data",
+  method: "GET",
+  handler: httpAction(async (ctx, request) => {
+    const data = { message: "Hello" };
+    
+    return new Response(JSON.stringify(data), {
+      status: 200,
+      headers: {
+        "Content-Type": "application/json",
+        "Access-Control-Allow-Origin": "https://example.com"
+      }
+    });
+  })
+});
+
+export default http;
+```
+
+### Importing handlers from separate files
+
+```typescript
+// convex/http.ts
+import { httpRouter } from "convex/server";
+import { postMessage, getByAuthor } from "./messages";
+
+const http = httpRouter();
+
+// Import handlers defined in other files
+http.route({
+  path: "/postMessage",
+  method: "POST",
+  handler: postMessage
+});
+
+http.route({
+  path: "/getMessagesByAuthor",
+  method: "GET",
+  handler: getByAuthor
+});
+
+export default http;
+```
+
+```typescript
+// convex/messages.ts
+import { httpAction } from "./_generated/server";
+import { api } from "./_generated/api";
+
+export const postMessage = httpAction(
+  async ({ runMutation }, request) => {
+    const { author, body } = await request.json();
+    await runMutation(api.sendMessage.default, { body, author });
+    
+    return new Response(null, { status: 200 });
+  }
+);
+
+export const getByAuthor = httpAction(
+  async ({ runQuery }, request) => {
+    const url = new URL(request.url);
+    const author = url.searchParams.get("author");
+    const messages = await runQuery(api.messages.list, { author });
+    
+    return new Response(JSON.stringify(messages), {
+      status: 200,
+      headers: { "Content-Type": "application/json" }
+    });
+  }
+);
+```
+
+## See also
+
+- [HTTP actions documentation](https://docs.convex.dev/functions/http-actions)
+- [Action context API](/api/server/action-context)
+- [httpAction builder](/api/server/functions#httpaction)

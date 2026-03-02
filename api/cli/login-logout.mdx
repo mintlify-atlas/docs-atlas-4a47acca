@@ -1,0 +1,278 @@
+---
+title: convex login & logout
+description: Authenticate with Convex and manage your session on the CLI
+---
+
+Manage authentication with Convex on your local machine. The `login` command authenticates your device, while `logout` removes your credentials.
+
+## convex login
+
+Login to Convex to authenticate your device for using the CLI.
+
+### Usage
+
+```bash
+npx convex login [options]
+```
+
+### Options
+
+<ParamField path="--device-name" type="string">
+  Provide a name for the device being authorized. This helps identify different machines in your account settings.
+
+  ```bash
+  npx convex login --device-name "Work Laptop"
+  ```
+</ParamField>
+
+<ParamField path="--force" type="boolean">
+  Proceed with login even if a valid access token already exists for this device. Use this to switch accounts or refresh authentication.
+
+  ```bash
+  npx convex login --force
+  ```
+</ParamField>
+
+<ParamField path="--no-open" type="boolean">
+  Don't automatically open the login link in the default browser. The URL will be printed to the console instead.
+
+  ```bash
+  npx convex login --no-open
+  ```
+</ParamField>
+
+<ParamField path="--login-flow" type="string">
+  How to log in. Options: `paste`, `auto`, `poll`. Defaults to `auto` (guesses based on the environment).
+
+  - `auto`: Automatically choose the best method
+  - `paste`: Manual token paste flow
+  - `poll`: Poll for authentication completion
+
+  ```bash
+  npx convex login --login-flow paste
+  ```
+</ParamField>
+
+### Examples
+
+#### First-time login
+
+Authenticate your device for the first time:
+
+```bash
+npx convex login
+```
+
+This will:
+1. Open your browser to the Convex authentication page
+2. Ask you to authorize the device
+3. Save the authentication token locally
+
+#### Login on a remote server
+
+When SSH'd into a server where you can't open a browser:
+
+```bash
+npx convex login --no-open
+```
+
+Copy the URL printed to the console and open it in a browser on your local machine.
+
+#### Name your device
+
+Identify different machines in your account:
+
+```bash
+npx convex login --device-name "CI Server"
+```
+
+#### Switch accounts
+
+Log in with a different account:
+
+```bash
+npx convex login --force
+```
+
+#### Login in CI/CD
+
+Use the manual paste flow for automation:
+
+```bash
+npx convex login --login-flow paste --no-open
+```
+
+## convex login status
+
+Check your login status and list accessible teams.
+
+### Usage
+
+```bash
+npx convex login status
+```
+
+### Examples
+
+#### Check login status
+
+See if you're logged in and which teams you have access to:
+
+```bash
+npx convex login status
+```
+
+Example output:
+```
+Convex account token found in: /Users/you/.convex/config.json
+Status: Logged in
+Teams: 2 teams accessible
+  - My Personal Team (my-team)
+  - Company Team (company)
+```
+
+## convex logout
+
+Log out of Convex on this machine by removing your stored credentials.
+
+### Usage
+
+```bash
+npx convex logout
+```
+
+### Examples
+
+#### Log out
+
+Remove authentication from your device:
+
+```bash
+npx convex logout
+```
+
+Output:
+```
+You have been logged out of Convex.
+  Run `npx convex dev` to log in.
+```
+
+#### Switch to a different account
+
+Log out and then log back in with different credentials:
+
+```bash
+npx convex logout
+npx convex login
+```
+
+## Authentication details
+
+### Where credentials are stored
+
+Authentication tokens are stored in your global Convex configuration file:
+
+- macOS/Linux: `~/.convex/config.json`
+- Windows: `%USERPROFILE%\.convex\config.json`
+
+### Device authorization
+
+Each device you use the CLI on needs to be authorized. You can:
+
+- View all authorized devices in your Convex dashboard account settings
+- Revoke device access at any time
+- Name devices for easy identification
+
+### Team access
+
+After logging in, you can:
+
+- Access all teams you're a member of
+- Create new projects in any team
+- Deploy to any deployment you have permissions for
+
+Use `npx convex login status` to see which teams you have access to.
+
+## Common workflows
+
+### First-time setup
+
+```bash
+# Login
+npx convex login
+
+# Verify login worked
+npx convex login status
+
+# Start development
+npx convex dev
+```
+
+### CI/CD setup
+
+For CI/CD pipelines, use deploy keys instead of user login:
+
+```bash
+# Set deploy key as environment variable
+export CONVEX_DEPLOY_KEY="your-deploy-key"
+
+# Deploy without login
+npx convex deploy --prod
+```
+
+Deploy keys can be created in your project settings in the Convex dashboard.
+
+### Switching accounts
+
+```bash
+# Log out of current account
+npx convex logout
+
+# Log in with new account
+npx convex login
+
+# Verify new account
+npx convex login status
+```
+
+### Remote development
+
+When developing on a remote server:
+
+```bash
+# Get login URL without opening browser
+npx convex login --no-open --device-name "AWS Dev Server"
+
+# Copy the URL and open in your local browser
+# Complete authentication
+# Return to terminal and continue
+```
+
+## Troubleshooting
+
+### Already logged in message
+
+If you see "This device has previously been authorized", you're already logged in. To force a new login:
+
+```bash
+npx convex login --force
+```
+
+### Browser doesn't open
+
+If the browser doesn't open automatically:
+
+```bash
+npx convex login --no-open
+```
+
+Then manually copy and open the URL shown in your terminal.
+
+### Invalid or expired token
+
+If you get authentication errors, log out and log back in:
+
+```bash
+npx convex logout
+npx convex login
+```

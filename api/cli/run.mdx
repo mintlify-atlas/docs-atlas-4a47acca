@@ -1,0 +1,214 @@
+---
+title: convex run
+description: Execute Convex functions (queries, mutations, or actions) directly from the CLI
+---
+
+Run a function (query, mutation, or action) on your deployment. This is useful for testing functions, running one-off operations, or watching query results in real-time.
+
+## Usage
+
+```bash
+npx convex run <functionName> [args] [options]
+```
+
+## Arguments
+
+<ParamField path="functionName" type="string" required>
+  Identifier of the function to run, like `listMessages` or `dir/file:myFunction`.
+
+  ```bash
+  npx convex run messages:list
+  ```
+</ParamField>
+
+<ParamField path="args" type="string">
+  JSON-formatted arguments object to pass to the function. Defaults to `{}`.
+
+  ```bash
+  npx convex run messages:send '{"text": "Hello", "userId": "123"}'
+  ```
+</ParamField>
+
+## Options
+
+<ParamField path="--watch" type="boolean">
+  Watch a query, printing its result if the underlying data changes. The function must be a query.
+
+  ```bash
+  npx convex run messages:list --watch
+  ```
+</ParamField>
+
+<ParamField path="--push" type="boolean">
+  Push code to deployment before running the function. Not supported for production deployments.
+
+  ```bash
+  npx convex run myFunction --push
+  ```
+</ParamField>
+
+<ParamField path="--identity" type="string">
+  JSON-formatted UserIdentity object to run the function as a specific user.
+
+  ```bash
+  npx convex run myQuery --identity '{"name": "John", "tokenIdentifier": "user_123"}'
+  ```
+</ParamField>
+
+<ParamField path="--component" type="string">
+  Path to the component in the component tree defined in `convex.config.ts`.
+
+  ```bash
+  npx convex run myFunction --component my/component
+  ```
+</ParamField>
+
+<ParamField path="--prod" type="boolean">
+  Run the function on this project's production deployment instead of dev.
+
+  ```bash
+  npx convex run myQuery --prod
+  ```
+</ParamField>
+
+<ParamField path="--typecheck" type="string">
+  Whether to check TypeScript files with `tsc --noEmit`. Options: `enable`, `try`, `disable`. Defaults to `try`.
+
+  Only used when `--push` is specified.
+
+  ```bash
+  npx convex run myFunction --push --typecheck enable
+  ```
+</ParamField>
+
+<ParamField path="--typecheck-components" type="boolean">
+  Check TypeScript files within component implementations with `tsc --noEmit`. Defaults to `false`.
+
+  Only used when `--push` is specified.
+
+  ```bash
+  npx convex run myFunction --push --typecheck-components
+  ```
+</ParamField>
+
+<ParamField path="--codegen" type="string">
+  Regenerate code in `convex/_generated/`. Options: `enable`, `disable`. Defaults to `enable`.
+
+  Only used when `--push` is specified.
+
+  ```bash
+  npx convex run myFunction --push --codegen enable
+  ```
+</ParamField>
+
+<ParamField path="--env-file" type="string">
+  Path to a custom file of environment variables for choosing the deployment. Same format as `.env.local` or `.env` files, and overrides them.
+
+  ```bash
+  npx convex run myFunction --env-file .env.staging
+  ```
+</ParamField>
+
+## Examples
+
+### Run a query
+
+Execute a query function and see the result:
+
+```bash
+npx convex run messages:list
+```
+
+### Run a mutation with arguments
+
+Execute a mutation with JSON arguments:
+
+```bash
+npx convex run messages:send '{"text": "Hello, world!", "channel": "general"}'
+```
+
+### Watch a query for changes
+
+Continuously watch a query and see updates when data changes:
+
+```bash
+npx convex run messages:list --watch
+```
+
+### Run with push
+
+Push your latest code changes and then run the function:
+
+```bash
+npx convex run myNewFunction --push
+```
+
+### Run on production
+
+Execute a query on your production deployment:
+
+```bash
+npx convex run analytics:getDailyStats --prod
+```
+
+### Run as a specific user
+
+Execute a function with a user identity:
+
+```bash
+npx convex run users:getProfile --identity '{"tokenIdentifier": "user_123"}'
+```
+
+### Complex arguments
+
+Pass complex nested objects:
+
+```bash
+npx convex run createOrder '{
+  "items": [{"id": "item1", "quantity": 2}],
+  "shipping": {"address": "123 Main St", "city": "NYC"},
+  "total": 99.99
+}'
+```
+
+## Common use cases
+
+### Testing during development
+
+Quickly test a function you're working on:
+
+```bash
+npx convex run myFunction --push
+```
+
+### One-off data operations
+
+Run a mutation to fix or update data:
+
+```bash
+npx convex run admin:migrateUserData '{"batchSize": 100}'
+```
+
+### Real-time monitoring
+
+Watch query results update live during development:
+
+```bash
+npx convex run dashboard:getMetrics --watch
+```
+
+### Production queries
+
+Inspect production data safely with read-only queries:
+
+```bash
+npx convex run reports:getMonthlyRevenue '{"month": "2024-01"}' --prod
+```
+
+## Notes
+
+- The `--push` flag is not supported for production deployments. Use `npx convex deploy` to push to production.
+- When using `--watch`, press Ctrl+C to stop watching and exit.
+- Arguments must be valid JSON. Use single quotes around the JSON string in bash/zsh shells.
+- Query functions are read-only and safe to run on production.
+- Be careful when running mutations on production deployments.
