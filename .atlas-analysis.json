@@ -1,0 +1,171 @@
+{
+  "projectType": "data-platform",
+  "projectName": "Convex Backend",
+  "projectDescription": "Open-source reactive database for app developers with TypeScript functions, real-time sync, and self-hosting capabilities",
+  "theme": "aspen",
+  "primaryColor": "#F55041",
+  "lightColor": "#FF6B5E",
+  "darkColor": "#D9442E",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Getting Started",
+            "pages": [
+              "introduction",
+              "quickstart",
+              "architecture"
+            ]
+          },
+          {
+            "group": "Core Concepts",
+            "pages": [
+              "concepts/reactive-database",
+              "concepts/functions",
+              "concepts/schemas",
+              "concepts/real-time-sync"
+            ]
+          },
+          {
+            "group": "Backend Features",
+            "pages": [
+              "features/database",
+              "features/queries-mutations",
+              "features/authentication",
+              "features/file-storage",
+              "features/scheduling",
+              "features/search",
+              "features/vector-search"
+            ]
+          },
+          {
+            "group": "Client SDKs",
+            "pages": [
+              "client/typescript-sdk",
+              "client/react",
+              "client/browser",
+              "client/nextjs"
+            ]
+          },
+          {
+            "group": "Self-Hosting",
+            "pages": [
+              "self-hosting/overview",
+              "self-hosting/docker",
+              "self-hosting/configuration",
+              "self-hosting/database-setup",
+              "self-hosting/storage"
+            ]
+          },
+          {
+            "group": "Development",
+            "pages": [
+              "development/building-from-source",
+              "development/local-development",
+              "development/testing",
+              "development/contributing"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "Server API",
+            "pages": [
+              "api/server/queries",
+              "api/server/mutations",
+              "api/server/actions",
+              "api/server/database",
+              "api/server/schema",
+              "api/server/authentication",
+              "api/server/storage",
+              "api/server/scheduler"
+            ]
+          },
+          {
+            "group": "Client API",
+            "pages": [
+              "api/client/convex-client",
+              "api/client/react-hooks",
+              "api/client/http-client"
+            ]
+          },
+          {
+            "group": "CLI Commands",
+            "pages": [
+              "api/cli/overview",
+              "api/cli/dev",
+              "api/cli/deploy",
+              "api/cli/import-export",
+              "api/cli/env",
+              "api/cli/data"
+            ]
+          },
+          {
+            "group": "Backend Configuration",
+            "pages": [
+              "api/backend/runtime-config",
+              "api/backend/database-config",
+              "api/backend/admin-api"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Architecture",
+        "groups": [
+          {
+            "group": "System Design",
+            "pages": [
+              "architecture/overview",
+              "architecture/rust-backend",
+              "architecture/isolate-runtime",
+              "architecture/persistence",
+              "architecture/indexing"
+            ]
+          },
+          {
+            "group": "Components",
+            "pages": [
+              "architecture/components/local-backend",
+              "architecture/components/database-engine",
+              "architecture/components/function-runner",
+              "architecture/components/sync-protocol"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Reactive database with real-time synchronization",
+    "TypeScript/JavaScript server functions (queries, mutations, actions)",
+    "Automatic schema validation and type generation",
+    "Full-text and vector search capabilities",
+    "Built-in authentication and file storage",
+    "Scheduled functions and cron jobs",
+    "Self-hosting with Docker or prebuilt binaries",
+    "React, Next.js, and browser client libraries",
+    "Component system for modular backend code",
+    "SQL database backends (SQLite, PostgreSQL, MySQL)",
+    "S3-compatible storage integration"
+  ],
+  "publicApiSurface": [
+    "convex/server: query, mutation, action, internalQuery, internalMutation, internalAction",
+    "convex/server: defineSchema, defineTable",
+    "convex/server: httpRouter, cronJobs",
+    "convex/react: useQuery, useMutation, useAction, ConvexProvider, ConvexReactClient",
+    "convex/browser: ConvexHttpClient",
+    "convex/nextjs: preloadQuery, fetchQuery, fetchMutation, fetchAction",
+    "CLI: convex dev, convex deploy, convex import, convex export, convex env, convex data",
+    "Database: db.query(), db.get(), db.insert(), db.patch(), db.replace(), db.delete()",
+    "Search: db.query(table).withSearchIndex(), db.query(table).withVectorIndex()",
+    "Storage: storage.store(), storage.getUrl(), storage.getMetadata(), storage.delete()",
+    "Auth: ctx.auth.getUserIdentity()",
+    "Scheduler: scheduler.runAfter(), scheduler.runAt()"
+  ]
+}
