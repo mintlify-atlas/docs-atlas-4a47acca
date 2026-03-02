@@ -1,122 +1,156 @@
 {
   "$schema": "https://mintlify.com/docs.json",
-  "theme": "mint",
-  "name": "Mint Starter Kit",
+  "name": "Convex Backend",
+  "theme": "aspen",
   "colors": {
-    "primary": "#16A34A",
-    "light": "#07C983",
-    "dark": "#15803D"
+    "primary": "#F55041",
+    "light": "#FF6B5E",
+    "dark": "#D9442E"
   },
-  "favicon": "/favicon.svg",
+  "navbar": {
+    "primary": {
+      "type": "github",
+      "href": "https://github.com/get-convex/convex-backend"
+    }
+  },
+  "footer": {
+    "socials": {
+      "github": "https://github.com/get-convex/convex-backend"
+    }
+  },
   "navigation": {
     "tabs": [
       {
-        "tab": "Guides",
+        "tab": "Documentation",
         "groups": [
           {
-            "group": "Getting started",
+            "group": "Getting Started",
             "pages": [
-              "index",
+              "introduction",
               "quickstart",
-              "development"
+              "architecture"
             ]
           },
           {
-            "group": "Customization",
+            "group": "Core Concepts",
             "pages": [
-              "essentials/settings",
-              "essentials/navigation"
+              "concepts/reactive-database",
+              "concepts/functions",
+              "concepts/schemas",
+              "concepts/real-time-sync"
             ]
           },
           {
-            "group": "Writing content",
+            "group": "Backend Features",
             "pages": [
-              "essentials/markdown",
-              "essentials/code",
-              "essentials/images",
-              "essentials/reusable-snippets"
+              "features/database",
+              "features/queries-mutations",
+              "features/authentication",
+              "features/file-storage",
+              "features/scheduling",
+              "features/search",
+              "features/vector-search"
             ]
           },
           {
-            "group": "AI tools",
+            "group": "Client SDKs",
             "pages": [
-              "ai-tools/cursor",
-              "ai-tools/claude-code",
-              "ai-tools/windsurf"
+              "client/typescript-sdk",
+              "client/react",
+              "client/browser",
+              "client/nextjs"
+            ]
+          },
+          {
+            "group": "Self-Hosting",
+            "pages": [
+              "self-hosting/overview",
+              "self-hosting/docker",
+              "self-hosting/configuration",
+              "self-hosting/database-setup",
+              "self-hosting/storage"
+            ]
+          },
+          {
+            "group": "Development",
+            "pages": [
+              "development/building-from-source",
+              "development/local-development",
+              "development/testing",
+              "development/contributing"
             ]
           }
         ]
       },
       {
-        "tab": "API reference",
+        "tab": "API Reference",
         "groups": [
           {
-            "group": "API documentation",
+            "group": "Server API",
             "pages": [
-              "api-reference/introduction"
+              "api/server/queries",
+              "api/server/mutations",
+              "api/server/actions",
+              "api/server/database",
+              "api/server/schema",
+              "api/server/authentication",
+              "api/server/storage",
+              "api/server/scheduler"
             ]
           },
           {
-            "group": "Endpoint examples",
+            "group": "Client API",
             "pages": [
-              "api-reference/endpoint/get",
-              "api-reference/endpoint/create",
-              "api-reference/endpoint/delete",
-              "api-reference/endpoint/webhook"
+              "api/client/convex-client",
+              "api/client/react-hooks",
+              "api/client/http-client"
+            ]
+          },
+          {
+            "group": "CLI Commands",
+            "pages": [
+              "api/cli/overview",
+              "api/cli/dev",
+              "api/cli/deploy",
+              "api/cli/import-export",
+              "api/cli/env",
+              "api/cli/data"
+            ]
+          },
+          {
+            "group": "Backend Configuration",
+            "pages": [
+              "api/backend/runtime-config",
+              "api/backend/database-config",
+              "api/backend/admin-api"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Architecture",
+        "groups": [
+          {
+            "group": "System Design",
+            "pages": [
+              "architecture/overview",
+              "architecture/rust-backend",
+              "architecture/isolate-runtime",
+              "architecture/persistence",
+              "architecture/indexing"
+            ]
+          },
+          {
+            "group": "Components",
+            "pages": [
+              "architecture/components/local-backend",
+              "architecture/components/database-engine",
+              "architecture/components/function-runner",
+              "architecture/components/sync-protocol"
             ]
           }
         ]
       }
-    ],
-    "global": {
-      "anchors": [
-        {
-          "anchor": "Documentation",
-          "href": "https://mintlify.com/docs",
-          "icon": "book-open-cover"
-        },
-        {
-          "anchor": "Blog",
-          "href": "https://mintlify.com/blog",
-          "icon": "newspaper"
-        }
-      ]
-    }
-  },
-  "logo": {
-    "light": "/logo/light.svg",
-    "dark": "/logo/dark.svg"
-  },
-  "navbar": {
-    "links": [
-      {
-        "label": "Support",
-        "href": "mailto:hi@mintlify.com"
-      }
-    ],
-    "primary": {
-      "type": "button",
-      "label": "Dashboard",
-      "href": "https://dashboard.mintlify.com"
-    }
-  },
-  "contextual": {
-    "options": [
-     "copy",
-     "view",
-     "chatgpt",
-     "claude",
-     "perplexity",
-     "mcp",
-     "cursor",
-     "vscode"
-   ]
-  },
-  "footer": {
-    "socials": {
-      "x": "https://x.com/mintlify",
-      "github": "https://github.com/mintlify",
-      "linkedin": "https://linkedin.com/company/mintlify"
-    }
+    ]
   }
 }

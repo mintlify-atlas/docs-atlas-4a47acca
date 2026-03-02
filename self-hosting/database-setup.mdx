@@ -1,0 +1,370 @@
+---
+title: Database setup
+description: Configure PostgreSQL or MySQL databases for your self-hosted Convex deployment
+---
+
+The Convex backend is designed to work with SQLite, PostgreSQL, or MySQL. By default, the Docker image uses SQLite, which is great for getting started. For production workloads requiring guaranteed uptime, we recommend using a managed PostgreSQL or MySQL service.
+
+<Warning>
+  It's very important your backend is hosted in the same region and as close as possible to your database. Any additional latency between backend and database will negatively impact query performance.
+</Warning>
+
+## Supported databases
+
+- **SQLite**: Default, built-in (no configuration needed)
+- **PostgreSQL**: Version 17 and compatible versions
+- **MySQL**: Version 8 and compatible versions
+
+## Migrating between databases
+
+Use `npx convex export` to export your data before moving from one database provider to another:
+
+```bash
+npx convex export --path ./backup.zip
+```
+
+After setting up your new database, import the data:
+
+```bash
+npx convex import --replace-all ./backup.zip
+```
+
+## PostgreSQL setup
+
+### Using Neon (recommended)
+
+[Neon](https://neon.tech) provides managed PostgreSQL with automatic scaling and branching.
+
+<Steps>
+  <Step title="Create a database on Neon">
+    Copy the connection string from the Neon dashboard.
+  </Step>
+
+  <Step title="Create the Convex database">
+    ```bash
+    export DATABASE_CONNECTION='postgresql://user:password@host.neon.tech/defaultdb?sslmode=require'
+    psql $DATABASE_CONNECTION -c "CREATE DATABASE convex_self_hosted"
+    ```
+  </Step>
+
+  <Step title="Set the POSTGRES_URL environment variable">
+    Extract the connection string without the database name and query parameters:
+
+    ```bash
+    export POSTGRES_URL=$(echo $DATABASE_CONNECTION | sed -E 's/\/[^/]+(\?.*)?$//')
+    ```
+
+    This should result in a URL ending in `neon.tech`:
+
+    ```bash
+    # Example result
+    postgresql://user:password@host.neon.tech
+    ```
+  </Step>
+
+  <Step title="Configure your deployment">
+    Add to your `.env` file:
+
+    ```bash .env
+    POSTGRES_URL='postgresql://user:password@host.neon.tech'
+    ```
+
+    Or set as a secret on your hosting platform:
+
+    ```bash
+    # Fly.io example
+    fly secrets set POSTGRES_URL=$POSTGRES_URL
+    ```
+  </Step>
+
+  <Step title="Restart the backend">
+    ```bash
+    docker compose down
+    docker compose up
+    ```
+
+    Check the logs for a line like:
+
+    ```
+    Connected to Postgres
+    ```
+  </Step>
+
+  <Step title="Deploy your functions">
+    Redeploy your Convex functions to the new database:
+
+    ```bash
+    npx convex deploy
+    ```
+  </Step>
+</Steps>
+
+### Using local PostgreSQL
+
+For local development:
+
+<Steps>
+  <Step title="Create the database">
+    ```bash
+    psql postgres -c "CREATE DATABASE convex_self_hosted"
+    ```
+  </Step>
+
+  <Step title="Set environment variables">
+    Create a `.env` file with your PostgreSQL connection:
+
+    ```bash .env
+    POSTGRES_URL='postgresql://your-username@host.docker.internal:5432'
+    DO_NOT_REQUIRE_SSL=1
+    ```
+
+    <Warning>
+      Only use `DO_NOT_REQUIRE_SSL=1` for local development. Production deployments should use SSL.
+    </Warning>
+  </Step>
+
+  <Step title="Start the backend">
+    ```bash
+    docker compose up
+    ```
+  </Step>
+</Steps>
+
+### Custom database names
+
+The database name is derived from your instance name (with `-` replaced by `_`):
+
+```bash .env
+POSTGRES_URL='postgresql://user:password@host.provider.com'
+INSTANCE_NAME='my-production-instance'
+```
+
+Create the corresponding database:
+
+```bash
+psql $POSTGRES_URL -c "CREATE DATABASE my_production_instance;"
+```
+
+## MySQL setup
+
+### Using PlanetScale
+
+[PlanetScale](https://planetscale.com) provides managed MySQL with Vitess.
+
+<Steps>
+  <Step title="Create a database on PlanetScale">
+    Create a database named `convex_self_hosted` in the PlanetScale dashboard.
+  </Step>
+
+  <Step title="Get the connection string">
+    Copy the connection string from PlanetScale. Do not include the database name in `MYSQL_URL`.
+  </Step>
+
+  <Step title="Configure your deployment">
+    Add to your `.env` file:
+
+    ```bash .env
+    MYSQL_URL='mysql://user:password@aws.connect.psdb.cloud'
+    ```
+  </Step>
+
+  <Step title="Start the backend">
+    ```bash
+    docker compose up
+    ```
+  </Step>
+</Steps>
+
+### Using local MySQL
+
+For local development:
+
+<Steps>
+  <Step title="Create the database">
+    ```bash
+    mysql -e "CREATE DATABASE convex_self_hosted;"
+    ```
+  </Step>
+
+  <Step title="Set environment variables">
+    Create a `.env` file:
+
+    ```bash .env
+    MYSQL_URL='mysql://your-username@host.docker.internal:3306'
+    DO_NOT_REQUIRE_SSL=1
+    ```
+
+    <Warning>
+      Only use `DO_NOT_REQUIRE_SSL=1` for local development. Production deployments should use SSL.
+    </Warning>
+  </Step>
+
+  <Step title="Start the backend">
+    ```bash
+    docker compose up
+    ```
+  </Step>
+</Steps>
+
+## Database naming conventions
+
+The Convex backend connects to a database with the same name as your instance:
+
+- Default instance name: `convex-self-hosted`
+- Default database name: `convex_self_hosted` (hyphens replaced with underscores)
+
+To use a custom database name, set the `INSTANCE_NAME` environment variable:
+
+```bash .env
+INSTANCE_NAME='my-app-production'
+```
+
+Then create the corresponding database:
+
+```bash
+# PostgreSQL
+psql $POSTGRES_URL -c "CREATE DATABASE my_app_production;"
+
+# MySQL
+mysql -e "CREATE DATABASE my_app_production;"
+```
+
+## Connection string format
+
+### PostgreSQL
+
+```
+postgresql://[user[:password]@][host][:port][/dbname][?param1=value1&...]
+```
+
+**Important**: `POSTGRES_URL` should NOT include the database name or query parameters:
+
+```bash
+# Correct
+POSTGRES_URL='postgresql://user:password@host.provider.com'
+
+# Incorrect
+POSTGRES_URL='postgresql://user:password@host.provider.com/convex_self_hosted?sslmode=require'
+```
+
+### MySQL
+
+```
+mysql://[user[:password]@][host][:port][/dbname][?param1=value1&...]
+```
+
+**Important**: `MYSQL_URL` should NOT include the database name or query parameters:
+
+```bash
+# Correct
+MYSQL_URL='mysql://user:password@host.provider.com'
+
+# Incorrect
+MYSQL_URL='mysql://user:password@host.provider.com/convex_self_hosted?ssl=true'
+```
+
+## Verification
+
+After configuring your database, verify the connection:
+
+<Steps>
+  <Step title="Check the logs">
+    Look for connection confirmation:
+
+    ```bash
+    docker compose logs backend | grep -i connected
+    ```
+
+    You should see:
+
+    ```
+    Connected to Postgres
+    ```
+
+    or
+
+    ```
+    Connected to MySQL
+    ```
+  </Step>
+
+  <Step title="Deploy functions">
+    Deploy your Convex functions to ensure everything works:
+
+    ```bash
+    npx convex deploy
+    ```
+  </Step>
+
+  <Step title="Test the deployment">
+    Run a test query:
+
+    ```bash
+    npx convex run myFunction
+    ```
+  </Step>
+</Steps>
+
+## Troubleshooting
+
+### Connection errors
+
+If you see connection errors in the logs:
+
+1. **Verify the connection string**: Ensure it doesn't include the database name or query parameters
+2. **Check region/latency**: Ensure your backend is in the same region as your database
+3. **Verify SSL settings**: Use `DO_NOT_REQUIRE_SSL=1` only for local development
+4. **Check firewall rules**: Ensure your hosting platform can access your database
+
+### Database not found
+
+If you see "database not found" errors:
+
+1. **Verify database exists**: Check that you created the database with the correct name
+2. **Check instance name**: Ensure the database name matches your instance name (with hyphens replaced by underscores)
+3. **Verify permissions**: Ensure your database user has access to the database
+
+### Performance issues
+
+1. **Check latency**: Use `ping` or similar tools to measure latency between backend and database
+2. **Same region**: Ensure backend and database are in the same region
+3. **Connection pooling**: Managed services typically handle this automatically
+
+## Example configurations
+
+### Production with Neon PostgreSQL
+
+```bash .env
+POSTGRES_URL='postgresql://user:password@ep-region-12345.us-east-2.aws.neon.tech'
+INSTANCE_NAME='my-production-app'
+CONVEX_CLOUD_ORIGIN='https://api.my-domain.com'
+CONVEX_SITE_ORIGIN='https://my-domain.com'
+```
+
+### Production with PlanetScale MySQL
+
+```bash .env
+MYSQL_URL='mysql://user:password@aws.connect.psdb.cloud'
+INSTANCE_NAME='my-production-app'
+CONVEX_CLOUD_ORIGIN='https://api.my-domain.com'
+CONVEX_SITE_ORIGIN='https://my-domain.com'
+```
+
+### Local development with PostgreSQL
+
+```bash .env
+POSTGRES_URL='postgresql://postgres@host.docker.internal:5432'
+DO_NOT_REQUIRE_SSL=1
+RUST_LOG=debug
+```
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Storage" icon="cloud" href="/self-hosting/storage">
+    Configure S3-compatible storage for files and exports
+  </Card>
+  <Card title="Configuration" icon="sliders" href="/self-hosting/configuration">
+    Explore all runtime configuration options
+  </Card>
+</CardGroup>

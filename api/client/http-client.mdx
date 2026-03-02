@@ -1,0 +1,292 @@
+---
+title: "ConvexHttpClient"
+description: "A Convex client that runs queries and mutations over HTTP"
+---
+
+## Overview
+
+`ConvexHttpClient` is a stateful client that runs queries and mutations over HTTP instead of WebSocket. This is appropriate for server-side code (like serverless functions, API routes, or backend services) or non-reactive web applications.
+
+<Warning>
+  This client is stateful (it has user credentials and queues mutations), so take care to avoid sharing it between requests in a server. Create a new instance per request when using in server-side code.
+</Warning>
+
+## Constructor
+
+Create a new `ConvexHttpClient` instance.
+
+```typescript
+import { ConvexHttpClient } from "convex/browser";
+
+const client = new ConvexHttpClient(process.env.CONVEX_URL);
+```
+
+### Parameters
+
+<ParamField path="address" type="string" required>
+  The URL of your Convex deployment, often provided by an environment variable.
+  For example: `https://small-mouse-123.convex.cloud`
+</ParamField>
+
+<ParamField path="options" type="object">
+  Optional configuration object for the client.
+  
+  <Expandable title="options properties">
+    <ParamField path="skipConvexDeploymentUrlCheck" type="boolean" default="false">
+      Skip validating that the Convex deployment URL looks like a standard Convex URL.
+      Useful for self-hosted backends.
+    </ParamField>
+    
+    <ParamField path="logger" type="Logger | boolean">
+      A logger, `true`, or `false`. If not provided, logs to the console.
+      If `false`, logs are not printed anywhere.
+    </ParamField>
+    
+    <ParamField path="auth" type="string">
+      A JWT containing identity claims. This identity may expire, so you may need to call `setAuth()` later,
+      but for short-lived clients it's convenient to specify this value here.
+    </ParamField>
+    
+    <ParamField path="fetch" type="typeof fetch">
+      A custom fetch implementation to use for all HTTP requests made by this client.
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+## Methods
+
+### query
+
+Execute a Convex query function.
+
+```typescript
+const messages = await client.query(
+  api.messages.list,
+  { channel: "#general" }
+);
+```
+
+<ParamField path="query" type="FunctionReference<'query'>" required>
+  A function reference for the public query to run, like `api.dir1.dir2.filename.func`.
+</ParamField>
+
+<ParamField path="args" type="object">
+  An arguments object for the query. If omitted, the arguments will be `{}`.
+</ParamField>
+
+**Returns:** A promise of the query's result.
+
+### mutation
+
+Execute a Convex mutation function. Mutations are queued by default.
+
+```typescript
+const taskId = await client.mutation(
+  api.tasks.create,
+  { text: "New task", completed: false }
+);
+```
+
+<ParamField path="mutation" type="FunctionReference<'mutation'>" required>
+  A function reference for the public mutation to run.
+</ParamField>
+
+<ParamField path="args" type="object">
+  An arguments object for the mutation. If omitted, the arguments will be `{}`.
+</ParamField>
+
+<ParamField path="options" type="HttpMutationOptions">
+  <Expandable title="options properties">
+    <ParamField path="skipQueue" type="boolean" default="false">
+      Skip the default queue of mutations and run this immediately.
+      This allows the same HttpConvexClient to request multiple mutations in parallel,
+      something not possible with WebSocket-based clients.
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+**Returns:** A promise of the mutation's result.
+
+<Note>
+  By default, mutations are queued and executed sequentially. This ensures mutations are applied in order.
+  Set `skipQueue: true` to execute mutations in parallel.
+</Note>
+
+### action
+
+Execute a Convex action function. Actions are not queued.
+
+```typescript
+const summary = await client.action(
+  api.ai.generateSummary,
+  { text: "Some long text..." }
+);
+```
+
+<ParamField path="action" type="FunctionReference<'action'>" required>
+  A function reference for the public action to run.
+</ParamField>
+
+<ParamField path="args" type="object">
+  An arguments object for the action. If omitted, the arguments will be `{}`.
+</ParamField>
+
+**Returns:** A promise of the action's result.
+
+### setAuth
+
+Set the authentication token to be used for subsequent queries and mutations.
+
+```typescript
+const token = await getAuthToken();
+client.setAuth(token);
+```
+
+<ParamField path="value" type="string" required>
+  JWT-encoded OpenID Connect identity token.
+</ParamField>
+
+<Note>
+  Should be called whenever the token changes (e.g., due to expiration and refresh).
+</Note>
+
+### clearAuth
+
+Clear the current authentication token if set.
+
+```typescript
+client.clearAuth();
+```
+
+## Properties
+
+### url
+
+Return the address for this client.
+
+```typescript
+const deploymentUrl = client.url;
+```
+
+**Returns:** The Convex deployment URL as a string.
+
+<Note>
+  Not guaranteed to match the address used in the constructor as it may be canonicalized.
+</Note>
+
+## Example usage
+
+### Basic usage in a serverless function
+
+```typescript
+import { ConvexHttpClient } from "convex/browser";
+import { api } from "../convex/_generated/api";
+
+export async function handler(request) {
+  const client = new ConvexHttpClient(process.env.CONVEX_URL);
+  
+  // Fetch data
+  const tasks = await client.query(api.tasks.list, {});
+  
+  // Create a new task
+  const newTaskId = await client.mutation(api.tasks.create, {
+    text: "New task from API",
+    completed: false
+  });
+  
+  return {
+    statusCode: 200,
+    body: JSON.stringify({ tasks, newTaskId })
+  };
+}
+```
+
+### With authentication
+
+```typescript
+import { ConvexHttpClient } from "convex/browser";
+import { api } from "../convex/_generated/api";
+
+export async function handler(request) {
+  const client = new ConvexHttpClient(process.env.CONVEX_URL);
+  
+  // Extract JWT from request headers
+  const authToken = request.headers.authorization?.replace("Bearer ", "");
+  
+  if (authToken) {
+    client.setAuth(authToken);
+  }
+  
+  // Now queries and mutations run with the authenticated user's context
+  const userTasks = await client.query(api.tasks.listMine, {});
+  
+  return {
+    statusCode: 200,
+    body: JSON.stringify({ tasks: userTasks })
+  };
+}
+```
+
+### Parallel mutations with skipQueue
+
+```typescript
+import { ConvexHttpClient } from "convex/browser";
+import { api } from "../convex/_generated/api";
+
+const client = new ConvexHttpClient(process.env.CONVEX_URL);
+
+// Execute mutations in parallel
+const results = await Promise.all([
+  client.mutation(api.tasks.create, { text: "Task 1" }, { skipQueue: true }),
+  client.mutation(api.tasks.create, { text: "Task 2" }, { skipQueue: true }),
+  client.mutation(api.tasks.create, { text: "Task 3" }, { skipQueue: true })
+]);
+```
+
+### Next.js API route
+
+```typescript
+import type { NextApiRequest, NextApiResponse } from "next";
+import { ConvexHttpClient } from "convex/browser";
+import { api } from "../../convex/_generated/api";
+
+export default async function handler(
+  req: NextApiRequest,
+  res: NextApiResponse
+) {
+  const client = new ConvexHttpClient(process.env.CONVEX_URL!);
+  
+  if (req.method === "GET") {
+    const tasks = await client.query(api.tasks.list, {});
+    return res.status(200).json({ tasks });
+  }
+  
+  if (req.method === "POST") {
+    const { text } = req.body;
+    const taskId = await client.mutation(api.tasks.create, {
+      text,
+      completed: false
+    });
+    return res.status(201).json({ taskId });
+  }
+  
+  return res.status(405).json({ error: "Method not allowed" });
+}
+```
+
+## Comparison with ConvexReactClient
+
+| Feature | ConvexHttpClient | ConvexReactClient |
+|---------|------------------|-------------------|
+| Transport | HTTP | WebSocket |
+| Use case | Server-side, API routes | React applications |
+| Reactivity | No (one-time fetch) | Yes (automatic updates) |
+| Mutation queuing | Yes (configurable) | Yes |
+| React hooks | No | Yes |
+| Subscriptions | No | Yes |
+
+<Tip>
+  Use `ConvexHttpClient` for server-side code and `ConvexReactClient` for React applications.
+  If you need to use Convex in a non-React frontend, consider using `ConvexHttpClient` with polling
+  or use the WebSocket-based `BaseConvexClient` (advanced usage).
+</Tip>

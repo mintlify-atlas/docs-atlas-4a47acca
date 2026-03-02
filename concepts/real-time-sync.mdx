@@ -1,0 +1,501 @@
+---
+title: Real-time synchronization
+description: Learn how Convex's real-time sync protocol keeps your application UI instantly in sync with backend data
+---
+
+Convex provides real-time synchronization between your backend and frontend, keeping your UI automatically in sync with your database. When any data changes, all affected queries re-run and push updates to subscribed clients within milliseconds.
+
+## How real-time sync works
+
+The synchronization protocol operates in three phases:
+
+<Steps>
+
+<Step title="Subscription">
+When you use a query in your client (e.g., with `useQuery` in React), Convex establishes a WebSocket connection and subscribes to that query.
+
+```typescript
+import { useQuery } from "convex/react";
+import { api } from "./_generated/api";
+
+function MessageList() {
+  // Subscribes to the query and opens WebSocket connection
+  const messages = useQuery(api.messages.list);
+  
+  return <div>{/* render messages */}</div>;
+}
+```
+</Step>
+
+<Step title="Dependency tracking">
+Convex tracks which documents and indexes each query reads. When the query runs, the backend records all database operations:
+
+```typescript
+// Backend query
+export const list = query({
+  args: { channelId: v.id("channels") },
+  handler: async (ctx, args) => {
+    // Convex tracks that this query reads:
+    // - Index: messages.by_channel
+    // - Documents: all messages where channelId matches
+    return await ctx.db
+      .query("messages")
+      .withIndex("by_channel", (q) => q.eq("channelId", args.channelId))
+      .take(50);
+  },
+});
+```
+</Step>
+
+<Step title="Change detection and push">
+When a mutation modifies data, Convex:
+1. Identifies which queries might be affected
+2. Re-runs those queries with fresh data
+3. Pushes updates to subscribed clients over WebSocket
+
+```typescript
+// When this mutation runs
+export const send = mutation({
+  args: { channelId: v.id("channels"), body: v.string() },
+  handler: async (ctx, args) => {
+    await ctx.db.insert("messages", {
+      channelId: args.channelId,
+      body: args.body,
+    });
+    // Convex automatically:
+    // 1. Detects queries reading this channel
+    // 2. Re-runs those queries
+    // 3. Pushes updates to subscribed clients
+  },
+});
+```
+</Step>
+
+</Steps>
+
+## Client integration
+
+Convex provides React hooks that handle subscriptions automatically:
+
+### useQuery
+
+The primary hook for reading data reactively:
+
+```typescript
+import { useQuery } from "convex/react";
+import { api } from "./_generated/api";
+
+function TaskList({ userId }) {
+  const tasks = useQuery(api.tasks.list, { userId });
+  
+  // tasks is:
+  // - undefined while loading
+  // - array of tasks once loaded
+  // - automatically updates when data changes
+  
+  if (tasks === undefined) {
+    return <div>Loading...</div>;
+  }
+  
+  return (
+    <ul>
+      {tasks.map(task => (
+        <li key={task._id}>{task.text}</li>
+      ))}
+    </ul>
+  );
+}
+```
+
+### useMutation
+
+Call mutations from your UI:
+
+```typescript
+import { useMutation } from "convex/react";
+import { api } from "./_generated/api";
+
+function CreateTaskForm() {
+  const createTask = useMutation(api.tasks.create);
+  
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    const formData = new FormData(e.target);
+    
+    // Call the mutation
+    await createTask({
+      text: formData.get("text"),
+    });
+    
+    // Any useQuery subscribed to tasks automatically updates
+  };
+  
+  return (
+    <form onSubmit={handleSubmit}>
+      <input name="text" />
+      <button type="submit">Create Task</button>
+    </form>
+  );
+}
+```
+
+### useAction
+
+Call actions for external operations:
+
+```typescript
+import { useAction } from "convex/react";
+import { api } from "./_generated/api";
+
+function PaymentButton({ orderId }) {
+  const processPayment = useAction(api.payments.process);
+  const [isProcessing, setIsProcessing] = useState(false);
+  
+  const handlePayment = async () => {
+    setIsProcessing(true);
+    try {
+      await processPayment({ orderId });
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+  
+  return (
+    <button onClick={handlePayment} disabled={isProcessing}>
+      {isProcessing ? "Processing..." : "Pay Now"}
+    </button>
+  );
+}
+```
+
+## WebSocket connection
+
+Convex uses a single WebSocket connection for all real-time communication:
+
+### Connection lifecycle
+
+```typescript
+import { useConvex } from "convex/react";
+import { useEffect } from "react";
+
+function ConnectionStatus() {
+  const convex = useConvex();
+  const [status, setStatus] = useState("connecting");
+  
+  useEffect(() => {
+    // Listen to connection state changes
+    const unsubscribe = convex.onUpdate(() => {
+      // Connection states:
+      // - "connecting" - Establishing connection
+      // - "connected" - Active connection
+      // - "disconnected" - Connection lost (will auto-reconnect)
+    });
+    
+    return unsubscribe;
+  }, [convex]);
+  
+  return <div>Status: {status}</div>;
+}
+```
+
+### Automatic reconnection
+
+Convex automatically handles connection failures:
+
+- Detects when the WebSocket disconnects
+- Attempts to reconnect with exponential backoff
+- Re-subscribes to all active queries when reconnected
+- Updates UI seamlessly when connection is restored
+
+You don't need to handle reconnection logic manually.
+
+## Update latency
+
+Convex delivers updates with minimal latency:
+
+- **Typical latency**: 50-100ms from mutation commit to client update
+- **Network overhead**: Single WebSocket reduces overhead vs polling
+- **Batching**: Multiple changes are batched into single updates when possible
+
+```typescript
+// Example: Measuring update latency
+export const createMessage = mutation({
+  args: { body: v.string() },
+  handler: async (ctx, args) => {
+    const messageId = await ctx.db.insert("messages", {
+      body: args.body,
+      timestamp: Date.now(),  // Server timestamp
+    });
+    return messageId;
+  },
+});
+
+// Client code
+const messages = useQuery(api.messages.list);
+const createMessage = useMutation(api.messages.create);
+
+const handleSend = async (body) => {
+  const sendTime = Date.now();
+  await createMessage({ body });
+  
+  // When useQuery updates, measure latency:
+  // receiveTime - sendTime is typically 50-100ms
+};
+```
+
+## Optimistic updates
+
+For instant UI feedback, use optimistic updates:
+
+```typescript
+import { useOptimisticMutation } from "convex/react";
+import { api } from "./_generated/api";
+
+function TodoList() {
+  const tasks = useQuery(api.tasks.list) ?? [];
+  const toggleTask = useOptimisticMutation(api.tasks.toggle);
+  
+  const handleToggle = (taskId, currentCompleted) => {
+    // UI updates immediately
+    toggleTask({
+      taskId,
+    }, {
+      // Optimistic update applied to local state
+      update: (localData) => {
+        return localData.map(task =>
+          task._id === taskId
+            ? { ...task, completed: !currentCompleted }
+            : task
+        );
+      },
+    });
+    
+    // Server response arrives ~50-100ms later
+    // If it differs, optimistic update is rolled back
+  };
+  
+  return (
+    <ul>
+      {tasks.map(task => (
+        <li key={task._id}>
+          <input
+            type="checkbox"
+            checked={task.completed}
+            onChange={() => handleToggle(task._id, task.completed)}
+          />
+          {task.text}
+        </li>
+      ))}
+    </ul>
+  );
+}
+```
+
+<Note>
+Optimistic updates provide instant feedback but require careful handling of errors and rollbacks. Use them for operations that rarely fail.
+</Note>
+
+## Subscription management
+
+Convex automatically manages subscriptions:
+
+### Automatic cleanup
+
+```typescript
+function MessageList({ channelId }) {
+  // Subscribes when component mounts
+  const messages = useQuery(api.messages.list, { channelId });
+  
+  // Automatically unsubscribes when component unmounts
+  // or when channelId changes
+  
+  return <div>{/* render messages */}</div>;
+}
+```
+
+### Conditional queries
+
+Skip queries conditionally:
+
+```typescript
+function UserProfile({ userId }) {
+  // Only subscribes when userId is defined
+  const user = useQuery(
+    api.users.get,
+    userId ? { userId } : "skip"
+  );
+  
+  if (!userId) return <div>Select a user</div>;
+  if (user === undefined) return <div>Loading...</div>;
+  
+  return <div>{user.name}</div>;
+}
+```
+
+### Multiple subscriptions
+
+You can have many concurrent subscriptions:
+
+```typescript
+function Dashboard() {
+  // All of these subscribe simultaneously over a single WebSocket
+  const users = useQuery(api.users.list);
+  const messages = useQuery(api.messages.recent);
+  const stats = useQuery(api.analytics.stats);
+  const notifications = useQuery(api.notifications.list);
+  
+  // Each updates independently when its data changes
+}
+```
+
+## Pagination and sync
+
+Paginated queries remain reactive:
+
+```typescript
+import { usePaginatedQuery } from "convex/react";
+import { api } from "./_generated/api";
+
+function InfiniteMessageList() {
+  const { results, status, loadMore } = usePaginatedQuery(
+    api.messages.paginated,
+    {},
+    { initialNumItems: 20 }
+  );
+  
+  // results automatically updates when:
+  // - New messages are added
+  // - Existing messages are modified
+  // - Messages are deleted
+  
+  return (
+    <div>
+      {results.map(message => (
+        <div key={message._id}>{message.body}</div>
+      ))}
+      {status === "CanLoadMore" && (
+        <button onClick={() => loadMore(20)}>Load More</button>
+      )}
+    </div>
+  );
+}
+```
+
+## Query consistency
+
+All queries see consistent snapshots:
+
+```typescript
+function ConsistentView() {
+  // Both queries see the same snapshot of the database
+  const users = useQuery(api.users.list);
+  const messages = useQuery(api.messages.list);
+  
+  // If a mutation creates a user and a message,
+  // both queries update together - you never see
+  // a message from a user that doesn't exist
+}
+```
+
+## Bandwidth optimization
+
+Convex optimizes bandwidth usage:
+
+- **Differential updates**: Only changed data is sent
+- **Compression**: WebSocket messages are compressed
+- **Batching**: Multiple updates are batched when possible
+- **Deduplication**: Identical queries share subscriptions
+
+```typescript
+// These two components share a single subscription
+function ComponentA() {
+  const messages = useQuery(api.messages.list, { channelId: "123" });
+}
+
+function ComponentB() {
+  // Same query, same args - reuses subscription
+  const messages = useQuery(api.messages.list, { channelId: "123" });
+}
+```
+
+## Error handling
+
+```typescript
+import { useQuery } from "convex/react";
+import { api } from "./_generated/api";
+
+function DataComponent() {
+  const data = useQuery(api.data.get);
+  
+  // data can be:
+  // - undefined (loading or error)
+  // - your data (success)
+  
+  // To distinguish loading from errors, use try/catch in your query:
+  // The query should throw errors that need to be shown to users
+  
+  if (data === undefined) {
+    return <div>Loading...</div>;
+  }
+  
+  return <div>{JSON.stringify(data)}</div>;
+}
+```
+
+## Non-React clients
+
+Convex supports real-time sync in other environments:
+
+### Vanilla JavaScript
+
+```javascript
+import { ConvexHttpClient } from "convex/browser";
+
+const client = new ConvexHttpClient("https://your-deployment.convex.cloud");
+
+// Subscribe to a query
+const unsubscribe = client.onUpdate(
+  api.messages.list,
+  { channelId: "123" },
+  (messages) => {
+    console.log("Messages updated:", messages);
+  }
+);
+
+// Unsubscribe when done
+unsubscribe();
+```
+
+### React Native
+
+Use the same React hooks:
+
+```typescript
+import { useQuery, useMutation } from "convex/react";
+import { api } from "./_generated/api";
+
+// Works identically to web React
+function MobileComponent() {
+  const data = useQuery(api.data.list);
+  const mutate = useMutation(api.data.create);
+  
+  // Automatic real-time updates on mobile
+}
+```
+
+## Comparison with alternatives
+
+| Feature | Convex Real-time | Polling | Firebase | GraphQL Subscriptions |
+|---------|------------------|---------|----------|-----------------------|
+| Latency | 50-100ms | Seconds | ~100ms | ~100ms |
+| Server load | Low | High | Low | Medium |
+| Battery usage | Low | High | Low | Low |
+| Bandwidth | Optimized | High | Optimized | Varies |
+| Setup complexity | None | Simple | Medium | High |
+| Consistency | Guaranteed | No | Eventually | Varies |
+
+## Next steps
+
+- Learn about [Functions](/concepts/functions) to create reactive queries
+- Understand the [Reactive database](/concepts/reactive-database) model
+- Define [Schemas](/concepts/schemas) for your data structure

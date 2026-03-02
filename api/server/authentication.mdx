@@ -1,0 +1,413 @@
+---
+title: Authentication API
+description: API reference for authentication in Convex functions
+---
+
+The authentication API allows you to access information about the currently authenticated user in your Convex functions.
+
+## Auth context
+
+### Auth
+
+The `ctx.auth` object is available in queries, mutations, and actions.
+
+```typescript
+import { query } from "./_generated/server";
+
+export const getCurrentUser = query({
+  args: {},
+  handler: async (ctx) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (identity === null) {
+      return null;
+    }
+    // identity contains user information from the JWT
+    return identity;
+  },
+});
+```
+
+### getUserIdentity
+
+Get details about the currently authenticated user.
+
+```typescript
+const identity = await ctx.auth.getUserIdentity();
+```
+
+<ResponseField name="return" type="UserIdentity | null">
+  A `UserIdentity` object if the user is authenticated, or `null` if not.
+  
+  - In queries, mutations, and actions: returns `null` if not authenticated
+  - In HTTP actions: throws an error if not authenticated
+</ResponseField>
+
+## User identity
+
+### UserIdentity
+
+Information about an authenticated user, derived from their JWT.
+
+```typescript
+const identity = await ctx.auth.getUserIdentity();
+if (identity) {
+  console.log(identity.tokenIdentifier); // Stable unique identifier
+  console.log(identity.subject);         // User ID from auth provider
+  console.log(identity.email);           // Email (if available)
+  console.log(identity.name);            // Full name (if available)
+}
+```
+
+<ResponseField name="tokenIdentifier" type="string">
+  A stable and globally unique identifier for this user. No other user, even from a different identity provider, will have the same identifier.
+  
+  **Tip:** Use this as your user ID or to look up users in your database.
+  
+  Derived from JWT claims: `sub` + `iss`
+</ResponseField>
+
+<ResponseField name="subject" type="string">
+  Identifier for the user from the identity provider. Not necessarily unique across different providers.
+  
+  JWT claim: `sub`
+</ResponseField>
+
+<ResponseField name="issuer" type="string">
+  The hostname of the identity provider that authenticated this user.
+  
+  JWT claim: `iss`
+</ResponseField>
+
+<ResponseField name="email" type="string" optional>
+  The user's email address.
+  
+  JWT claim: `email`
+</ResponseField>
+
+<ResponseField name="emailVerified" type="boolean" optional>
+  Whether the email address has been verified.
+  
+  JWT claim: `email_verified`
+</ResponseField>
+
+<ResponseField name="name" type="string" optional>
+  The user's full name.
+  
+  JWT claim: `name`
+</ResponseField>
+
+<ResponseField name="givenName" type="string" optional>
+  The user's given (first) name.
+  
+  JWT claim: `given_name`
+</ResponseField>
+
+<ResponseField name="familyName" type="string" optional>
+  The user's family (last) name.
+  
+  JWT claim: `family_name`
+</ResponseField>
+
+<ResponseField name="nickname" type="string" optional>
+  The user's nickname.
+  
+  JWT claim: `nickname`
+</ResponseField>
+
+<ResponseField name="preferredUsername" type="string" optional>
+  The user's preferred username.
+  
+  JWT claim: `preferred_username`
+</ResponseField>
+
+<ResponseField name="profileUrl" type="string" optional>
+  URL to the user's profile page.
+  
+  JWT claim: `profile`
+</ResponseField>
+
+<ResponseField name="pictureUrl" type="string" optional>
+  URL to the user's profile picture.
+  
+  JWT claim: `picture`
+</ResponseField>
+
+<ResponseField name="phoneNumber" type="string" optional>
+  The user's phone number.
+  
+  JWT claim: `phone_number`
+</ResponseField>
+
+<ResponseField name="phoneNumberVerified" type="boolean" optional>
+  Whether the phone number has been verified.
+  
+  JWT claim: `phone_number_verified`
+</ResponseField>
+
+<ResponseField name="gender" type="string" optional>
+  The user's gender.
+  
+  JWT claim: `gender`
+</ResponseField>
+
+<ResponseField name="birthday" type="string" optional>
+  The user's birthday.
+  
+  JWT claim: `birthdate`
+</ResponseField>
+
+<ResponseField name="timezone" type="string" optional>
+  The user's timezone.
+  
+  JWT claim: `zoneinfo`
+</ResponseField>
+
+<ResponseField name="language" type="string" optional>
+  The user's preferred language.
+  
+  JWT claim: `locale`
+</ResponseField>
+
+<ResponseField name="address" type="string" optional>
+  The user's address.
+  
+  JWT claim: `address`
+</ResponseField>
+
+<ResponseField name="updatedAt" type="string" optional>
+  When the user information was last updated.
+  
+  JWT claim: `updated_at`
+</ResponseField>
+
+### Custom claims
+
+Access custom JWT claims by asserting their type:
+
+```typescript
+const identity = await ctx.auth.getUserIdentity();
+if (identity === null) {
+  throw new Error("Not authenticated");
+}
+
+// Assert the type of a custom claim
+const role = identity.role as string;
+const permissions = identity.permissions as string[];
+```
+
+## Common patterns
+
+### Require authentication
+
+```typescript
+import { mutation } from "./_generated/server";
+import { v } from "convex/values";
+
+export const createPost = mutation({
+  args: { title: v.string(), content: v.string() },
+  handler: async (ctx, args) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (identity === null) {
+      throw new Error("Not authenticated");
+    }
+    
+    const postId = await ctx.db.insert("posts", {
+      title: args.title,
+      content: args.content,
+      authorId: identity.tokenIdentifier,
+    });
+    
+    return postId;
+  },
+});
+```
+
+### Look up user in database
+
+```typescript
+import { query } from "./_generated/server";
+
+export const getCurrentUser = query({
+  args: {},
+  handler: async (ctx) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (identity === null) {
+      return null;
+    }
+    
+    // Look up user by tokenIdentifier
+    const user = await ctx.db
+      .query("users")
+      .withIndex("by_token", (q) => 
+        q.eq("tokenIdentifier", identity.tokenIdentifier)
+      )
+      .unique();
+    
+    return user;
+  },
+});
+```
+
+### Create user on first login
+
+```typescript
+import { mutation } from "./_generated/server";
+
+export const storeUser = mutation({
+  args: {},
+  handler: async (ctx) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (identity === null) {
+      throw new Error("Not authenticated");
+    }
+    
+    // Check if user already exists
+    const existing = await ctx.db
+      .query("users")
+      .withIndex("by_token", (q) =>
+        q.eq("tokenIdentifier", identity.tokenIdentifier)
+      )
+      .unique();
+    
+    if (existing) {
+      return existing._id;
+    }
+    
+    // Create new user
+    const userId = await ctx.db.insert("users", {
+      tokenIdentifier: identity.tokenIdentifier,
+      name: identity.name ?? "Anonymous",
+      email: identity.email,
+    });
+    
+    return userId;
+  },
+});
+```
+
+### Role-based access control
+
+```typescript
+import { mutation } from "./_generated/server";
+import { v } from "convex/values";
+
+export const deletePost = mutation({
+  args: { postId: v.id("posts") },
+  handler: async (ctx, args) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (identity === null) {
+      throw new Error("Not authenticated");
+    }
+    
+    // Check user role from custom claim
+    const role = identity.role as string | undefined;
+    
+    const post = await ctx.db.get(args.postId);
+    if (!post) {
+      throw new Error("Post not found");
+    }
+    
+    // Allow if admin or post author
+    const isAdmin = role === "admin";
+    const isAuthor = post.authorId === identity.tokenIdentifier;
+    
+    if (!isAdmin && !isAuthor) {
+      throw new Error("Permission denied");
+    }
+    
+    await ctx.db.delete(args.postId);
+  },
+});
+```
+
+## Auth configuration
+
+### AuthConfig
+
+Configure authentication providers in `convex/auth.config.ts`:
+
+```typescript
+import { AuthConfig } from "convex/server";
+
+export default {
+  providers: [
+    {
+      domain: "https://your.issuer.url.com",
+      applicationID: "your-application-id",
+    },
+  ],
+} satisfies AuthConfig;
+```
+
+<ParamField path="providers" type="AuthProvider[]" required>
+  Array of authentication providers that can issue JWTs for your app.
+</ParamField>
+
+### OIDC provider
+
+```typescript
+{
+  domain: "https://accounts.google.com",
+  applicationID: "your-google-client-id",
+}
+```
+
+<ParamField path="domain" type="string" required>
+  The domain of the OIDC auth provider.
+</ParamField>
+
+<ParamField path="applicationID" type="string" required>
+  Tokens must have this application ID in their audiences.
+</ParamField>
+
+### Custom JWT provider
+
+```typescript
+{
+  type: "customJwt",
+  issuer: "https://auth.example.com",
+  jwks: "https://auth.example.com/.well-known/jwks.json",
+  algorithm: "RS256",
+  applicationID: "your-app-id", // Optional but recommended
+}
+```
+
+<ParamField path="type" type="'customJwt'" required>
+  Identifies this as a custom JWT provider.
+</ParamField>
+
+<ParamField path="issuer" type="string" required>
+  The issuer of the JWT (e.g., `https://auth.example.com`).
+</ParamField>
+
+<ParamField path="jwks" type="string" required>
+  URL to fetch the JWKS (e.g., `https://auth.example.com/.well-known/jwks.json`).
+</ParamField>
+
+<ParamField path="algorithm" type="'RS256' | 'ES256'" required>
+  The algorithm used to sign JWT tokens.
+</ParamField>
+
+<ParamField path="applicationID" type="string" optional>
+  Tokens must have this application ID in their audiences.
+  
+  **Warning:** Omitting applicationID is often insecure.
+</ParamField>
+
+## Best practices
+
+<Card title="Always check authentication" icon="shield-check">
+  For protected operations, always check that `getUserIdentity()` returns a non-null value.
+</Card>
+
+<Card title="Use tokenIdentifier as user ID" icon="fingerprint">
+  The `tokenIdentifier` is stable and unique across all users and providers. Use it to identify users in your database.
+</Card>
+
+<Card title="Store user data separately" icon="database">
+  Don't rely solely on JWT claims. Create a users table and store important user data there.
+</Card>
+
+<Card title="Validate custom claims" icon="check-double">
+  When using custom JWT claims, validate and type-assert them appropriately.
+</Card>

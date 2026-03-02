@@ -1,0 +1,483 @@
+---
+title: Storage configuration
+description: Configure S3-compatible storage for files, exports, and search indexes in your self-hosted Convex deployment
+---
+
+By default, the Convex backend stores file data on the local filesystem within the Docker container. For production deployments, you can configure S3-compatible storage for better scalability and reliability.
+
+## What gets stored in S3
+
+When configured, S3 storage is used for:
+
+- **Snapshot exports**: Database backups and exports
+- **Snapshot imports**: Data imports and migrations
+- **Function modules**: Compiled JavaScript/TypeScript code
+- **User files**: Files uploaded through the file storage API
+- **Search indexes**: Full-text search index data
+
+## Supported storage providers
+
+- **AWS S3**: Native S3 support
+- **Cloudflare R2**: S3-compatible storage
+- **MinIO**: Self-hosted S3-compatible storage
+- **DigitalOcean Spaces**: S3-compatible storage
+- **Backblaze B2**: S3-compatible storage
+- Other S3-compatible providers
+
+## S3 setup (AWS)
+
+<Steps>
+  <Step title="Create S3 buckets">
+    Create the following buckets in your AWS region:
+
+    ```bash
+    aws s3 mb s3://convex-snapshot-exports
+    aws s3 mb s3://convex-snapshot-imports
+    aws s3 mb s3://convex-modules
+    aws s3 mb s3://convex-user-files
+    aws s3 mb s3://convex-search-indexes
+    ```
+
+    <Warning>
+      Use unique bucket names. S3 bucket names must be globally unique across all AWS accounts.
+    </Warning>
+  </Step>
+
+  <Step title="Create IAM user and credentials">
+    Create an IAM user with programmatic access and attach a policy with permissions for these buckets:
+
+    ```json
+    {
+      "Version": "2012-10-17",
+      "Statement": [
+        {
+          "Effect": "Allow",
+          "Action": [
+            "s3:PutObject",
+            "s3:GetObject",
+            "s3:DeleteObject",
+            "s3:ListBucket"
+          ],
+          "Resource": [
+            "arn:aws:s3:::convex-*",
+            "arn:aws:s3:::convex-*/*"
+          ]
+        }
+      ]
+    }
+    ```
+  </Step>
+
+  <Step title="Configure environment variables">
+    Add to your `.env` file:
+
+    ```bash .env
+    AWS_REGION='us-east-1'
+    AWS_ACCESS_KEY_ID='AKIAIOSFODNN7EXAMPLE'
+    AWS_SECRET_ACCESS_KEY='wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY'
+    S3_STORAGE_EXPORTS_BUCKET='convex-snapshot-exports'
+    S3_STORAGE_SNAPSHOT_IMPORTS_BUCKET='convex-snapshot-imports'
+    S3_STORAGE_MODULES_BUCKET='convex-modules'
+    S3_STORAGE_FILES_BUCKET='convex-user-files'
+    S3_STORAGE_SEARCH_BUCKET='convex-search-indexes'
+    ```
+
+    <Warning>
+      Never commit AWS credentials to source control. Use environment variables or secrets management.
+    </Warning>
+  </Step>
+
+  <Step title="Restart the backend">
+    ```bash
+    docker compose down
+    docker compose up
+    ```
+  </Step>
+</Steps>
+
+## Cloudflare R2 setup
+
+Cloudflare R2 offers S3-compatible storage with zero egress fees.
+
+<Steps>
+  <Step title="Create R2 buckets">
+    In the Cloudflare dashboard, create the following R2 buckets:
+
+    - `convex-snapshot-exports`
+    - `convex-snapshot-imports`
+    - `convex-modules`
+    - `convex-user-files`
+    - `convex-search-indexes`
+  </Step>
+
+  <Step title="Create API token">
+    Create an R2 API token with read and write permissions for your buckets.
+  </Step>
+
+  <Step title="Configure environment variables">
+    Add to your `.env` file:
+
+    ```bash .env
+    AWS_REGION='auto'
+    AWS_ACCESS_KEY_ID='your-r2-access-key-id'
+    AWS_SECRET_ACCESS_KEY='your-r2-secret-access-key'
+    S3_ENDPOINT_URL='https://account-id.r2.cloudflarestorage.com'
+    AWS_S3_FORCE_PATH_STYLE=true
+    S3_STORAGE_EXPORTS_BUCKET='convex-snapshot-exports'
+    S3_STORAGE_SNAPSHOT_IMPORTS_BUCKET='convex-snapshot-imports'
+    S3_STORAGE_MODULES_BUCKET='convex-modules'
+    S3_STORAGE_FILES_BUCKET='convex-user-files'
+    S3_STORAGE_SEARCH_BUCKET='convex-search-indexes'
+    ```
+
+    Replace `account-id` with your Cloudflare account ID from the R2 dashboard.
+  </Step>
+
+  <Step title="Restart the backend">
+    ```bash
+    docker compose down
+    docker compose up
+    ```
+  </Step>
+</Steps>
+
+## MinIO setup (self-hosted)
+
+MinIO is an open-source S3-compatible storage server you can self-host.
+
+<Steps>
+  <Step title="Run MinIO">
+    ```bash
+    docker run -p 9000:9000 -p 9001:9001 \
+      -e "MINIO_ROOT_USER=minioadmin" \
+      -e "MINIO_ROOT_PASSWORD=minioadmin" \
+      quay.io/minio/minio server /data --console-address ":9001"
+    ```
+  </Step>
+
+  <Step title="Create buckets">
+    Access the MinIO console at `http://localhost:9001` and create the required buckets, or use the CLI:
+
+    ```bash
+    mc alias set local http://localhost:9000 minioadmin minioadmin
+    mc mb local/convex-snapshot-exports
+    mc mb local/convex-snapshot-imports
+    mc mb local/convex-modules
+    mc mb local/convex-user-files
+    mc mb local/convex-search-indexes
+    ```
+  </Step>
+
+  <Step title="Configure environment variables">
+    ```bash .env
+    AWS_REGION='us-east-1'
+    AWS_ACCESS_KEY_ID='minioadmin'
+    AWS_SECRET_ACCESS_KEY='minioadmin'
+    S3_ENDPOINT_URL='http://host.docker.internal:9000'
+    AWS_S3_FORCE_PATH_STYLE=true
+    AWS_S3_DISABLE_SSE=true
+    S3_STORAGE_EXPORTS_BUCKET='convex-snapshot-exports'
+    S3_STORAGE_SNAPSHOT_IMPORTS_BUCKET='convex-snapshot-imports'
+    S3_STORAGE_MODULES_BUCKET='convex-modules'
+    S3_STORAGE_FILES_BUCKET='convex-user-files'
+    S3_STORAGE_SEARCH_BUCKET='convex-search-indexes'
+    ```
+  </Step>
+</Steps>
+
+## Environment variable reference
+
+### Required variables
+
+<ParamField path="AWS_REGION" type="string" required>
+  AWS region where your S3 buckets are located. Use `auto` for Cloudflare R2.
+
+  ```bash
+  AWS_REGION='us-east-1'
+  ```
+</ParamField>
+
+<ParamField path="AWS_ACCESS_KEY_ID" type="string" required>
+  Access key ID for S3 authentication.
+</ParamField>
+
+<ParamField path="AWS_SECRET_ACCESS_KEY" type="string" required>
+  Secret access key for S3 authentication.
+</ParamField>
+
+### Bucket configuration
+
+<ParamField path="S3_STORAGE_EXPORTS_BUCKET" type="string" required>
+  S3 bucket name for snapshot exports.
+
+  ```bash
+  S3_STORAGE_EXPORTS_BUCKET='convex-snapshot-exports'
+  ```
+</ParamField>
+
+<ParamField path="S3_STORAGE_SNAPSHOT_IMPORTS_BUCKET" type="string" required>
+  S3 bucket name for snapshot imports.
+
+  ```bash
+  S3_STORAGE_SNAPSHOT_IMPORTS_BUCKET='convex-snapshot-imports'
+  ```
+</ParamField>
+
+<ParamField path="S3_STORAGE_MODULES_BUCKET" type="string" required>
+  S3 bucket name for function modules.
+
+  ```bash
+  S3_STORAGE_MODULES_BUCKET='convex-modules'
+  ```
+</ParamField>
+
+<ParamField path="S3_STORAGE_FILES_BUCKET" type="string" required>
+  S3 bucket name for user files.
+
+  ```bash
+  S3_STORAGE_FILES_BUCKET='convex-user-files'
+  ```
+</ParamField>
+
+<ParamField path="S3_STORAGE_SEARCH_BUCKET" type="string" required>
+  S3 bucket name for search indexes.
+
+  ```bash
+  S3_STORAGE_SEARCH_BUCKET='convex-search-indexes'
+  ```
+</ParamField>
+
+### Optional configuration
+
+<ParamField path="S3_ENDPOINT_URL" type="string">
+  Custom S3 endpoint URL. Required for S3-compatible services like R2, MinIO, etc.
+
+  ```bash
+  # Cloudflare R2
+  S3_ENDPOINT_URL='https://account-id.r2.cloudflarestorage.com'
+
+  # MinIO
+  S3_ENDPOINT_URL='http://minio.my-domain.com:9000'
+  ```
+</ParamField>
+
+<ParamField path="AWS_SESSION_TOKEN" type="string">
+  Session token for temporary AWS credentials (e.g., when using IAM roles).
+</ParamField>
+
+<ParamField path="AWS_S3_FORCE_PATH_STYLE" type="boolean">
+  Force path-style S3 URLs instead of virtual-hosted style.
+
+  ```bash
+  AWS_S3_FORCE_PATH_STYLE=true
+  ```
+
+  Required for Cloudflare R2 and most S3-compatible services.
+</ParamField>
+
+<ParamField path="AWS_S3_DISABLE_SSE" type="boolean">
+  Disable server-side encryption for S3 objects.
+
+  ```bash
+  AWS_S3_DISABLE_SSE=true
+  ```
+
+  Useful for MinIO and other self-hosted solutions.
+</ParamField>
+
+<ParamField path="AWS_S3_DISABLE_CHECKSUMS" type="boolean">
+  Disable checksums for S3 operations.
+
+  ```bash
+  AWS_S3_DISABLE_CHECKSUMS=true
+  ```
+</ParamField>
+
+## Migrating storage providers
+
+If you're switching between local storage and S3 storage (or between different S3 providers), you need to export and import your data.
+
+<Steps>
+  <Step title="Export from current backend">
+    ```bash
+    npx convex export --path ./backup.zip
+    ```
+
+    This creates a complete backup of your deployment.
+  </Step>
+
+  <Step title="Set up new storage provider">
+    Configure your new S3 buckets and environment variables as described above.
+  </Step>
+
+  <Step title="Restart backend with new storage">
+    ```bash
+    docker compose down
+    docker compose up
+    ```
+  </Step>
+
+  <Step title="Import data to new backend">
+    ```bash
+    npx convex import --replace-all ./backup.zip
+    ```
+  </Step>
+</Steps>
+
+<Warning>
+  The import process will replace all data in your deployment. Ensure you have a backup before proceeding.
+</Warning>
+
+## Bucket organization
+
+You can use a single bucket with different prefixes or separate buckets for each type of data. The examples above use separate buckets for better organization and access control.
+
+### Single bucket approach
+
+```bash .env
+S3_STORAGE_EXPORTS_BUCKET='convex-storage'
+S3_STORAGE_SNAPSHOT_IMPORTS_BUCKET='convex-storage'
+S3_STORAGE_MODULES_BUCKET='convex-storage'
+S3_STORAGE_FILES_BUCKET='convex-storage'
+S3_STORAGE_SEARCH_BUCKET='convex-storage'
+```
+
+Convex will automatically organize data using prefixes within the bucket.
+
+### Multiple buckets approach (recommended)
+
+```bash .env
+S3_STORAGE_EXPORTS_BUCKET='my-app-exports'
+S3_STORAGE_SNAPSHOT_IMPORTS_BUCKET='my-app-imports'
+S3_STORAGE_MODULES_BUCKET='my-app-modules'
+S3_STORAGE_FILES_BUCKET='my-app-files'
+S3_STORAGE_SEARCH_BUCKET='my-app-search'
+```
+
+Separate buckets allow for:
+- Granular access control
+- Independent lifecycle policies
+- Easier cost tracking
+- Better organization
+
+## Security best practices
+
+<Warning>
+  Follow these security practices to protect your data:
+</Warning>
+
+1. **Use IAM roles when possible**: Instead of access keys, use IAM roles for EC2, ECS, or other AWS services
+2. **Restrict bucket access**: Use bucket policies to restrict access to your backend's IP or VPC
+3. **Enable encryption**: Use server-side encryption (SSE-S3 or SSE-KMS) for sensitive data
+4. **Rotate credentials**: Regularly rotate your access keys
+5. **Use separate buckets per environment**: Don't share buckets between development, staging, and production
+6. **Enable versioning**: Protect against accidental deletions
+7. **Set lifecycle policies**: Automatically delete old exports and reduce costs
+
+## Verification
+
+After configuring S3 storage:
+
+<Steps>
+  <Step title="Check backend logs">
+    ```bash
+    docker compose logs backend | grep -i s3
+    ```
+
+    Look for messages indicating S3 storage is configured.
+  </Step>
+
+  <Step title="Test file upload">
+    Use the Convex file storage API to upload a test file and verify it appears in your S3 bucket.
+  </Step>
+
+  <Step title="Test export">
+    ```bash
+    npx convex export --path ./test-export.zip
+    ```
+
+    Verify the export appears in your exports bucket.
+  </Step>
+</Steps>
+
+## Troubleshooting
+
+### Access denied errors
+
+1. **Verify credentials**: Check that your AWS access key and secret are correct
+2. **Check IAM permissions**: Ensure your IAM user/role has the required S3 permissions
+3. **Verify bucket names**: Ensure bucket names are correct and exist
+4. **Check bucket policies**: Verify bucket policies don't block access
+
+### Connection timeout errors
+
+1. **Check endpoint URL**: Ensure `S3_ENDPOINT_URL` is correct for your provider
+2. **Verify network access**: Ensure your backend can reach the S3 endpoint
+3. **Check firewall rules**: Verify outbound connections to S3 are allowed
+
+### Path style errors
+
+If you see errors about virtual-hosted style vs path style:
+
+```bash
+AWS_S3_FORCE_PATH_STYLE=true
+```
+
+This is required for most S3-compatible services.
+
+## Example configurations
+
+### Production with AWS S3
+
+```bash .env
+AWS_REGION='us-east-1'
+AWS_ACCESS_KEY_ID='AKIAIOSFODNN7EXAMPLE'
+AWS_SECRET_ACCESS_KEY='wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY'
+S3_STORAGE_EXPORTS_BUCKET='my-app-prod-exports'
+S3_STORAGE_SNAPSHOT_IMPORTS_BUCKET='my-app-prod-imports'
+S3_STORAGE_MODULES_BUCKET='my-app-prod-modules'
+S3_STORAGE_FILES_BUCKET='my-app-prod-files'
+S3_STORAGE_SEARCH_BUCKET='my-app-prod-search'
+```
+
+### Production with Cloudflare R2
+
+```bash .env
+AWS_REGION='auto'
+AWS_ACCESS_KEY_ID='your-r2-access-key-id'
+AWS_SECRET_ACCESS_KEY='your-r2-secret-access-key'
+S3_ENDPOINT_URL='https://1a2b3c4d5e6f.r2.cloudflarestorage.com'
+AWS_S3_FORCE_PATH_STYLE=true
+S3_STORAGE_EXPORTS_BUCKET='convex-exports'
+S3_STORAGE_SNAPSHOT_IMPORTS_BUCKET='convex-imports'
+S3_STORAGE_MODULES_BUCKET='convex-modules'
+S3_STORAGE_FILES_BUCKET='convex-files'
+S3_STORAGE_SEARCH_BUCKET='convex-search'
+```
+
+### Local development with MinIO
+
+```bash .env
+AWS_REGION='us-east-1'
+AWS_ACCESS_KEY_ID='minioadmin'
+AWS_SECRET_ACCESS_KEY='minioadmin'
+S3_ENDPOINT_URL='http://host.docker.internal:9000'
+AWS_S3_FORCE_PATH_STYLE=true
+AWS_S3_DISABLE_SSE=true
+S3_STORAGE_EXPORTS_BUCKET='convex-exports'
+S3_STORAGE_SNAPSHOT_IMPORTS_BUCKET='convex-imports'
+S3_STORAGE_MODULES_BUCKET='convex-modules'
+S3_STORAGE_FILES_BUCKET='convex-files'
+S3_STORAGE_SEARCH_BUCKET='convex-search'
+```
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Configuration" icon="sliders" href="/self-hosting/configuration">
+    Explore all runtime configuration options
+  </Card>
+  <Card title="Database setup" icon="database" href="/self-hosting/database-setup">
+    Configure PostgreSQL or MySQL
+  </Card>
+</CardGroup>

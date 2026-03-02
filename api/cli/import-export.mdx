@@ -1,0 +1,221 @@
+---
+title: Import and export commands
+description: Import data to and export data from your Convex deployment
+---
+
+The Convex CLI provides commands to import data into and export data from your deployments, supporting multiple formats including CSV, JSON, and snapshot archives.
+
+## Import command
+
+Import data from a file to your Convex deployment.
+
+### Usage
+
+```bash
+npx convex import <path> [options]
+```
+
+### Arguments
+
+<ParamField path="path" type="string" required>
+  Path to the input file containing data to import.
+</ParamField>
+
+### Options
+
+<ParamField path="--table" type="string">
+  Destination table name.
+  
+  Required if format is `csv`, `jsonLines`, or `jsonArray`.
+  
+  Not supported if format is `zip`.
+</ParamField>
+
+<ParamField path="--format" type="string">
+  Input file format. Required only if the filename is missing an extension.
+  
+  **Choices:** `csv`, `jsonLines`, `jsonArray`, `zip`
+  
+  - **csv** - CSV files must have a header. Each row's entries are interpreted as numbers or strings.
+  - **jsonArray** - JSON files must be an array of JSON objects.
+  - **jsonLines** - JSON Lines files must have a JSON object per line.
+  - **zip** - ZIP files must have one directory per table, containing `<table>/documents.jsonl`. Snapshot exports from the Convex dashboard have this format.
+</ParamField>
+
+<ParamField path="--replace" type="boolean">
+  Replace all existing data in any of the imported tables.
+  
+  Conflicts with `--append` and `--replace-all`.
+</ParamField>
+
+<ParamField path="--append" type="boolean">
+  Append imported data to any existing tables.
+  
+  Conflicts with `--replace` and `--replace-all`.
+</ParamField>
+
+<ParamField path="--replace-all" type="boolean">
+  Replace all existing data in the deployment with the imported tables.
+  
+  - Deletes tables that don't appear in the import file or schema
+  - Clears tables that appear in the schema but not in the import file
+  
+  Conflicts with `--append` and `--replace`.
+</ParamField>
+
+<ParamField path="-y, --yes" type="boolean">
+  Skip confirmation prompt when import leads to deleting existing documents.
+</ParamField>
+
+<ParamField path="--component" type="string">
+  Path to the component in the component tree defined in `convex.config.ts`.
+</ParamField>
+
+### Examples
+
+#### Import from a snapshot
+
+Import data from a snapshot ZIP file:
+
+```bash
+npx convex import snapshot.zip
+```
+
+#### Import a single table from JSON
+
+Import JSON array into a specific table:
+
+```bash
+npx convex import --table users users.json
+```
+
+#### Import from CSV
+
+Import CSV data with headers:
+
+```bash
+npx convex import --table products --format csv products.csv
+```
+
+#### Replace table data
+
+Replace all existing data in the imported tables:
+
+```bash
+npx convex import snapshot.zip --replace
+```
+
+#### Import to production
+
+Import to your production deployment:
+
+```bash
+npx convex import snapshot.zip --prod
+```
+
+## Export command
+
+Export data from your Convex deployment to a ZIP file.
+
+### Usage
+
+```bash
+npx convex export --path <zipFilePath> [options]
+```
+
+### Options
+
+<ParamField path="--path" type="string" required>
+  Path for the exported ZIP file.
+  
+  May be a directory or an unoccupied `.zip` path.
+</ParamField>
+
+<ParamField path="--include-file-storage" type="boolean">
+  Include stored files in a `_storage` folder within the ZIP file.
+  
+  Files are stored via the file storage API (accessible at `/deployment/files` in the dashboard).
+</ParamField>
+
+### Examples
+
+#### Export all data
+
+Export all database tables to a ZIP file:
+
+```bash
+npx convex export --path backup.zip
+```
+
+#### Export with file storage
+
+Include uploaded files in the export:
+
+```bash
+npx convex export --path full-backup.zip --include-file-storage
+```
+
+#### Export from production
+
+Export data from your production deployment:
+
+```bash
+npx convex export --path prod-backup.zip --prod
+```
+
+#### Export to directory
+
+Export to a directory (the CLI will create a timestamped ZIP file):
+
+```bash
+npx convex export --path ./backups/
+```
+
+## Deployment selection
+
+Both import and export commands support deployment selection options:
+
+- `--prod` - Target production deployment
+- `--preview-name <name>` - Target a preview deployment
+- `--url <url>` - Target a specific deployment URL
+- `--admin-key <key>` - Admin key for authentication
+
+By default, commands target your dev deployment.
+
+## File formats
+
+### JSON Array
+
+```json
+[
+  { "_id": "123", "name": "Alice", "age": 30 },
+  { "_id": "456", "name": "Bob", "age": 25 }
+]
+```
+
+### JSON Lines
+
+```jsonl
+{"_id": "123", "name": "Alice", "age": 30}
+{"_id": "456", "name": "Bob", "age": 25}
+```
+
+### CSV
+
+```csv
+name,age,email
+Alice,30,alice@example.com
+Bob,25,bob@example.com
+```
+
+### ZIP (Snapshot format)
+
+```
+snapshot.zip
+├── users/
+│   └── documents.jsonl
+├── posts/
+│   └── documents.jsonl
+└── _storage/
+    └── files...
+```

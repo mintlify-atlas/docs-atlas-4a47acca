@@ -1,0 +1,318 @@
+---
+title: Authentication system
+description: Secure user authentication with JWT tokens and identity providers
+---
+
+Convex provides built-in authentication that works with any OpenID Connect (OIDC) provider or custom JWT tokens. Configure authentication in `auth.config.ts` and access user identity in your functions.
+
+## Configuration
+
+Define your authentication providers in `auth.config.ts`:
+
+```typescript
+import { AuthConfig } from "convex/server";
+
+export default {
+  providers: [
+    {
+      domain: "https://your.issuer.url.com",
+      applicationID: "your-application-id",
+    },
+  ],
+} satisfies AuthConfig;
+```
+
+### Auth config
+
+The `AuthConfig` type defines authentication configuration:
+
+<ParamField path="providers" type="AuthProvider[]">
+  An array of authentication providers allowed to issue JWTs for your app.
+</ParamField>
+
+### Auth providers
+
+Convex supports two types of authentication providers:
+
+#### OIDC provider
+
+```typescript
+{
+  domain: "https://auth.example.com",
+  applicationID: "your-app-id",
+}
+```
+
+<ParamField path="domain" type="string">
+  The domain of the OIDC auth provider.
+</ParamField>
+
+<ParamField path="applicationID" type="string">
+  Tokens issued by the auth provider must have this application ID in their audiences.
+</ParamField>
+
+#### Custom JWT provider
+
+```typescript
+{
+  type: "customJwt",
+  issuer: "https://auth.example.com",
+  jwks: "https://auth.example.com/.well-known/jwks.json",
+  algorithm: "RS256",
+  applicationID: "your-app-id", // Optional but recommended
+}
+```
+
+<ParamField path="type" type="'customJwt'">
+  Indicates this is a custom JWT provider.
+</ParamField>
+
+<ParamField path="issuer" type="string">
+  The issuer of the JWT auth provider (e.g., `https://auth.example.com`).
+</ParamField>
+
+<ParamField path="jwks" type="string">
+  The URL to fetch the JWKS (JSON Web Key Set) for token verification.
+</ParamField>
+
+<ParamField path="algorithm" type="'RS256' | 'ES256'">
+  The algorithm used to sign JWT tokens. Convex currently supports RS256 and ES256.
+</ParamField>
+
+<ParamField path="applicationID" type="string" optional>
+  Tokens must have this application ID in their audiences. **Warning:** Omitting applicationID is often insecure.
+</ParamField>
+
+## User identity
+
+Access authenticated user information via `ctx.auth` in queries, mutations, and actions.
+
+### Get user identity
+
+```typescript
+import { query } from "./_generated/server";
+
+export const getCurrentUser = query({
+  args: {},
+  handler: async (ctx) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (identity === null) {
+      return null; // User not authenticated
+    }
+
+    // Identity contains user information from JWT
+    const { tokenIdentifier, subject, issuer, email, name } = identity;
+    return identity;
+  },
+});
+```
+
+### UserIdentity interface
+
+The `UserIdentity` object contains information derived from the JWT token. Only `tokenIdentifier` and `issuer` are guaranteed to be present - all other fields depend on what the identity provider includes.
+
+#### Standard fields
+
+These fields are derived from OpenID Connect (OIDC) standard claims:
+
+<ParamField path="tokenIdentifier" type="string">
+  A stable and globally unique string for this identity. No other user, even from a different provider, will have the same string. Derived from JWT claims `sub` + `iss`.
+</ParamField>
+
+<ParamField path="subject" type="string">
+  Identifier for the end-user from the identity provider, not necessarily unique across different providers. JWT claim: `sub`.
+</ParamField>
+
+<ParamField path="issuer" type="string">
+  The hostname of the identity provider used to authenticate this user. JWT claim: `iss`.
+</ParamField>
+
+<ParamField path="name" type="string" optional>
+  The user's full name. JWT claim: `name`.
+</ParamField>
+
+<ParamField path="givenName" type="string" optional>
+  The user's given (first) name. JWT claim: `given_name`.
+</ParamField>
+
+<ParamField path="familyName" type="string" optional>
+  The user's family (last) name. JWT claim: `family_name`.
+</ParamField>
+
+<ParamField path="nickname" type="string" optional>
+  The user's nickname or username. JWT claim: `nickname`.
+</ParamField>
+
+<ParamField path="preferredUsername" type="string" optional>
+  The user's preferred username. JWT claim: `preferred_username`.
+</ParamField>
+
+<ParamField path="profileUrl" type="string" optional>
+  URL of the user's profile page. JWT claim: `profile`.
+</ParamField>
+
+<ParamField path="pictureUrl" type="string" optional>
+  URL of the user's profile picture. JWT claim: `picture`.
+</ParamField>
+
+<ParamField path="email" type="string" optional>
+  The user's email address. JWT claim: `email`.
+</ParamField>
+
+<ParamField path="emailVerified" type="boolean" optional>
+  Whether the email address has been verified. JWT claim: `email_verified`.
+</ParamField>
+
+<ParamField path="gender" type="string" optional>
+  The user's gender. JWT claim: `gender`.
+</ParamField>
+
+<ParamField path="birthday" type="string" optional>
+  The user's birthday. JWT claim: `birthdate`.
+</ParamField>
+
+<ParamField path="timezone" type="string" optional>
+  The user's timezone. JWT claim: `zoneinfo`.
+</ParamField>
+
+<ParamField path="language" type="string" optional>
+  The user's preferred language. JWT claim: `locale`.
+</ParamField>
+
+<ParamField path="phoneNumber" type="string" optional>
+  The user's phone number. JWT claim: `phone_number`.
+</ParamField>
+
+<ParamField path="phoneNumberVerified" type="boolean" optional>
+  Whether the phone number has been verified. JWT claim: `phone_number_verified`.
+</ParamField>
+
+<ParamField path="address" type="string" optional>
+  The user's address. JWT claim: `address`.
+</ParamField>
+
+<ParamField path="updatedAt" type="string" optional>
+  When the user's information was last updated. JWT claim: `updated_at`.
+</ParamField>
+
+#### Custom claims
+
+Any additional custom claims from your JWT are also available. Type assert them if you know their type:
+
+```typescript
+const identity = await ctx.auth.getUserIdentity();
+if (identity === null) {
+  return null;
+}
+// Type assert custom claims:
+const customClaim = identity.custom_claim as string;
+const role = identity.role as "admin" | "user";
+```
+
+## Auth interface
+
+The `Auth` interface is available as `ctx.auth` in all Convex functions:
+
+### getUserIdentity
+
+Get details about the currently authenticated user:
+
+```typescript
+const identity = await ctx.auth.getUserIdentity();
+```
+
+**Returns:** A `UserIdentity` object if the Convex client was configured with a valid ID token, otherwise:
+- Returns `null` in queries, mutations, and actions
+- Throws in HTTP actions
+
+## Common patterns
+
+### Require authentication
+
+Throw an error if the user is not authenticated:
+
+```typescript
+import { mutation } from "./_generated/server";
+import { v } from "convex/values";
+
+export const createPost = mutation({
+  args: { title: v.string(), content: v.string() },
+  handler: async (ctx, args) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) {
+      throw new Error("Unauthorized: must be logged in to create posts");
+    }
+
+    return await ctx.db.insert("posts", {
+      title: args.title,
+      content: args.content,
+      authorId: identity.tokenIdentifier,
+    });
+  },
+});
+```
+
+### Link users to documents
+
+Store the `tokenIdentifier` to link documents to users:
+
+```typescript
+// Create a user document on first login:
+export const ensureUser = mutation({
+  args: {},
+  handler: async (ctx) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) {
+      throw new Error("Not authenticated");
+    }
+
+    // Check if user exists
+    const existingUser = await ctx.db
+      .query("users")
+      .withIndex("by_token", (q) => q.eq("tokenIdentifier", identity.tokenIdentifier))
+      .unique();
+
+    if (existingUser) {
+      return existingUser._id;
+    }
+
+    // Create new user
+    return await ctx.db.insert("users", {
+      tokenIdentifier: identity.tokenIdentifier,
+      email: identity.email,
+      name: identity.name,
+    });
+  },
+});
+```
+
+### Role-based access control
+
+Implement custom roles using custom JWT claims:
+
+```typescript
+export const adminOnly = mutation({
+  args: { /* ... */ },
+  handler: async (ctx, args) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) {
+      throw new Error("Not authenticated");
+    }
+
+    const role = identity.role as string | undefined;
+    if (role !== "admin") {
+      throw new Error("Unauthorized: admin access required");
+    }
+
+    // Proceed with admin operation
+  },
+});
+```
+
+## Best practices
+
+- **Always check authentication** when required - `getUserIdentity()` can return `null`.
+- **Use `tokenIdentifier` for user linking** - It's stable and globally unique.
+- **Configure `applicationID`** - Omitting it in custom JWT providers is often insecure.
+- **Store minimal user data** - Only store what you need from the identity in your database.
+- **Use internal mutations for admin operations** - Don't expose sensitive operations as public functions.

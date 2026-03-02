@@ -1,0 +1,338 @@
+---
+title: Browser client
+description: Using Convex clients in browser environments
+---
+
+The browser module provides clients for accessing Convex from browser JavaScript applications without React.
+
+## Installation
+
+<CodeGroup>
+```bash npm
+npm install convex
+```
+
+```bash yarn
+yarn add convex
+```
+
+```bash pnpm
+pnpm add convex
+```
+</CodeGroup>
+
+## Importing
+
+```typescript
+import { ConvexClient, ConvexHttpClient } from "convex/browser";
+```
+
+<Info>
+If you are using React, use the `convex/react` module instead for better integration with React's rendering and state management.
+</Info>
+
+## ConvexClient
+
+A WebSocket-based client that subscribes to queries and executes mutations and actions. Provides reactive updates when query results change.
+
+### Basic usage
+
+```typescript
+import { ConvexClient } from "convex/browser";
+import { api } from "./convex/_generated/api";
+
+const client = new ConvexClient("https://small-mouse-123.convex.cloud");
+
+const unsubscribe = client.onUpdate(
+  api.messages.list,
+  {},
+  (messages) => {
+    console.log(messages);
+  }
+);
+```
+
+### Constructor options
+
+```typescript
+const client = new ConvexClient(address, {
+  disabled: false,
+  unsavedChangesWarning: true,
+  // ... other options
+});
+```
+
+**Options:**
+
+- `disabled` - Disables subscriptions (useful for SSR)
+- `unsavedChangesWarning` - Prompts users about unsaved changes before leaving
+
+### Subscribing to queries
+
+The `onUpdate` method subscribes to a query and calls a callback when results change:
+
+```typescript
+const unsubscribe = client.onUpdate(
+  api.messages.list,
+  { channel: "#general" },
+  (messages) => {
+    // Update UI with new messages
+    renderMessages(messages);
+  },
+  (error) => {
+    // Handle errors
+    console.error("Query error:", error);
+  }
+);
+```
+
+**Return value:**
+
+The return value is both a function and an object:
+
+```typescript
+// Use as a function
+const unsubscribe = client.onUpdate(api.messages.list, {}, callback);
+unsubscribe();
+
+// Use as an object
+const subscription = client.onUpdate(api.messages.list, {}, callback);
+const current = subscription.getCurrentValue();
+subscription.unsubscribe();
+```
+
+### Executing mutations
+
+```typescript
+const taskId = await client.mutation(api.tasks.create, {
+  text: "New task"
+});
+```
+
+### Executing actions
+
+```typescript
+const result = await client.action(api.ai.generateSummary, {
+  text: "Some long text..."
+});
+```
+
+### One-time queries
+
+```typescript
+const tasks = await client.query(api.tasks.list, { completed: false });
+```
+
+### Authentication
+
+Set authentication with an async token fetcher:
+
+```typescript
+client.setAuth(
+  async () => {
+    const token = await getAuthToken();
+    return token; // or null if unavailable
+  },
+  (isAuthenticated) => {
+    console.log("Auth status:", isAuthenticated);
+  }
+);
+```
+
+### Connection state
+
+```typescript
+// Get current state
+const state = client.connectionState();
+console.log(state.isConnected);
+
+// Subscribe to changes
+const unsubscribe = client.subscribeToConnectionState((state) => {
+  updateConnectionIndicator(state.isConnected);
+});
+```
+
+### Paginated queries (experimental)
+
+```typescript
+const subscription = client.onPaginatedUpdate_experimental(
+  api.messages.list,
+  { channel: "#general" },
+  { initialNumItems: 20 },
+  (result) => {
+    renderMessages(result.results);
+    if (result.status === "CanLoadMore") {
+      enableLoadMoreButton(() => result.loadMore(10));
+    }
+  }
+);
+```
+
+### Cleanup
+
+Always close the client when done:
+
+```typescript
+await client.close();
+```
+
+## ConvexHttpClient
+
+An HTTP-based client for executing queries, mutations, and actions without maintaining a WebSocket connection. Suitable for server-side code or applications that don't need real-time updates.
+
+### Basic usage
+
+```typescript
+import { ConvexHttpClient } from "convex/browser";
+import { api } from "./convex/_generated/api";
+
+const client = new ConvexHttpClient("https://small-mouse-123.convex.cloud");
+
+const tasks = await client.query(api.tasks.list, {});
+```
+
+### Constructor options
+
+```typescript
+const client = new ConvexHttpClient(address, {
+  skipConvexDeploymentUrlCheck: false,
+  logger: true, // or false, or custom Logger
+  auth: "eyJhbGciOi...", // Optional initial auth token
+  fetch: customFetch // Optional custom fetch implementation
+});
+```
+
+### Executing queries
+
+```typescript
+const tasks = await client.query(api.tasks.list, { completed: false });
+```
+
+### Executing mutations
+
+Mutations are queued by default to ensure ordered execution:
+
+```typescript
+// Queued mutation (default)
+const taskId = await client.mutation(api.tasks.create, {
+  text: "New task"
+});
+
+// Skip the queue for parallel execution
+await client.mutation(
+  api.tasks.create,
+  { text: "Another task" },
+  { skipQueue: true }
+);
+```
+
+### Executing actions
+
+```typescript
+const result = await client.action(api.ai.generateSummary, {
+  text: "Some long text..."
+});
+```
+
+### Authentication
+
+```typescript
+// Set auth token
+client.setAuth("eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...");
+
+// Clear auth
+client.clearAuth();
+```
+
+### Consistent queries (experimental)
+
+Execute multiple queries at the same timestamp:
+
+```typescript
+const client = new ConvexHttpClient(address);
+
+const tasks = await client.consistentQuery(api.tasks.list, {});
+const users = await client.consistentQuery(api.users.list, {});
+// Both queries see the database at the same point in time
+```
+
+<Warning>
+Consistent queries have a 30-second time limit. Create a new client for a fresh timestamp.
+</Warning>
+
+## Choosing a client
+
+| Client | Use case | Connection | Reactivity |
+|--------|----------|------------|------------|
+| `ConvexClient` | Browser apps | WebSocket | Yes |
+| `ConvexHttpClient` | Serverless functions, non-reactive apps | HTTP | No |
+| `ConvexReactClient` | React apps | WebSocket | Yes |
+
+**Use `ConvexClient` when:**
+- Building a browser application without React
+- You need real-time updates
+- You want to subscribe to query changes
+
+**Use `ConvexHttpClient` when:**
+- Running in serverless functions or edge workers
+- Making one-off requests
+- You don't need real-time updates
+- Minimizing connection overhead is important
+
+## Error handling
+
+```typescript
+import { ConvexError } from "convex/values";
+
+try {
+  await client.mutation(api.tasks.create, { text: "New task" });
+} catch (error) {
+  if (error instanceof ConvexError) {
+    // Handle application errors with data
+    console.error("Convex error:", error.data);
+  } else {
+    // Handle network or other errors
+    console.error("Error:", error);
+  }
+}
+```
+
+## Type safety
+
+All clients use generated TypeScript types:
+
+```typescript
+import { api } from "./convex/_generated/api";
+
+// Fully type-safe
+const tasks = await client.query(api.tasks.list, {
+  completed: false // Type-checked argument
+});
+// tasks has the correct return type
+```
+
+## BaseConvexClient
+
+For advanced use cases, you can extend `BaseConvexClient` to build custom clients:
+
+```typescript
+import { BaseConvexClient } from "convex/browser";
+
+const client = new BaseConvexClient(
+  address,
+  (updatedQueries) => {
+    // Handle query updates
+  },
+  options
+);
+```
+
+## Best practices
+
+- Store deployment URLs in environment variables
+- Always close clients when done to prevent memory leaks
+- Use `ConvexClient` for browser apps that need reactivity
+- Use `ConvexHttpClient` for server-side code
+- Handle errors appropriately for mutations and actions
+- For React applications, use `convex/react` instead
+- Implement connection state UI for better user experience

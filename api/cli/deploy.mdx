@@ -1,0 +1,158 @@
+---
+title: convex deploy
+description: Deploy to your production deployment
+---
+
+The `convex deploy` command deploys your Convex functions to your production deployment. By default, it deploys to your prod deployment, but it can also create and deploy to preview deployments when using Preview Deploy Keys.
+
+## Usage
+
+```bash
+npx convex deploy [options]
+```
+
+## Options
+
+<ParamField path="-v, --verbose" type="boolean">
+  Show full listing of changes and detailed output.
+</ParamField>
+
+<ParamField path="--dry-run" type="boolean">
+  Print out the generated configuration without deploying to your Convex deployment.
+</ParamField>
+
+<ParamField path="-y, --yes" type="boolean">
+  Skip confirmation prompt when running locally.
+</ParamField>
+
+<ParamField path="--typecheck" type="string" default="try">
+  Check TypeScript files with `tsc --noEmit` before deploying.
+  
+  **Choices:** `enable`, `try`, `disable`
+</ParamField>
+
+<ParamField path="--typecheck-components" type="boolean" default={false}>
+  Check TypeScript files within component implementations with `tsc --noEmit`.
+</ParamField>
+
+<ParamField path="--codegen" type="string" default="enable">
+  Regenerate code in `convex/_generated/` before pushing.
+  
+  **Choices:** `enable`, `disable`
+</ParamField>
+
+<ParamField path="--cmd" type="string">
+  Command to run as part of deploying your app (e.g., `vite build`).
+  
+  This command can depend on the environment variables specified in `--cmd-url-env-var-name` being set.
+</ParamField>
+
+<ParamField path="--cmd-url-env-var-name" type="string">
+  Environment variable name to set Convex deployment URL when using `--cmd`.
+  
+  Example: `VITE_CONVEX_URL`
+</ParamField>
+
+<ParamField path="--preview-create" type="string">
+  The name to associate with a newly created preview deployment.
+  
+  Defaults to the current Git branch name in Vercel, Netlify, and GitHub CI.
+  
+  Can only be used with a Preview Deploy Key (set via `CONVEX_DEPLOY_KEY`).
+  
+  Conflicts with `--preview-name`.
+</ParamField>
+
+<ParamField path="--preview-run" type="string">
+  Function to run if deploying to a preview deployment.
+  
+  Ignored when deploying to a production deployment.
+</ParamField>
+
+## Environment variables
+
+<ParamField path="CONVEX_DEPLOY_KEY" type="string">
+  Deploy key for authentication. The type of key determines the deployment target:
+  
+  - **Production Deploy Key** - Deploys to production
+  - **Preview Deploy Key** - Creates or updates a preview deployment
+  
+  Generate deploy keys in the Convex dashboard under Settings > Deploy Keys.
+</ParamField>
+
+<ParamField path="CONVEX_DEPLOYMENT" type="string">
+  Deployment name to deploy to (alternative to using deploy keys).
+</ParamField>
+
+## Examples
+
+### Deploy to production
+
+Deploy to your production deployment:
+
+```bash
+export CONVEX_DEPLOY_KEY=prod_deploy_key_here
+npx convex deploy
+```
+
+### Preview deployment (CI/CD)
+
+Create or update a preview deployment in CI:
+
+```bash
+export CONVEX_DEPLOY_KEY=preview_deploy_key_here
+npx convex deploy --preview-create "feature-branch"
+```
+
+### Deploy with build command
+
+Run your frontend build after deploying Convex:
+
+```bash
+npx convex deploy --cmd "npm run build" --cmd-url-env-var-name VITE_CONVEX_URL
+```
+
+### Dry run
+
+Check what would be deployed without actually deploying:
+
+```bash
+npx convex deploy --dry-run
+```
+
+### Deploy and run a function
+
+Deploy to preview and run a seed function:
+
+```bash
+export CONVEX_DEPLOY_KEY=preview_deploy_key_here
+npx convex deploy --preview-run api.seed.initialize
+```
+
+## Preview deployments
+
+Preview deployments allow you to create temporary deployments for testing:
+
+1. Generate a Preview Deploy Key in your Convex dashboard
+2. Set `CONVEX_DEPLOY_KEY` to your Preview Deploy Key
+3. Run `npx convex deploy --preview-create <name>`
+
+The CLI automatically detects the branch name from:
+- Vercel (`VERCEL_GIT_COMMIT_REF`)
+- Netlify (`BRANCH`)
+- GitHub Actions (`GITHUB_HEAD_REF` or `GITHUB_REF_NAME`)
+
+## Build environment checks
+
+The CLI checks for non-production build environments (Vercel, Netlify, GitHub Actions) when deploying to production and warns if you might be deploying from the wrong environment.
+
+Disable this check with:
+
+```bash
+npx convex deploy --check-build-environment disable
+```
+
+## Exit codes
+
+- `0` - Deployment successful
+- `1` - Deployment failed or was cancelled

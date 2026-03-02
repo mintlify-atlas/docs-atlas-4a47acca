@@ -1,0 +1,369 @@
+---
+title: "React hooks"
+description: "React hooks for querying and mutating Convex data"
+---
+
+## Overview
+
+Convex provides React hooks to seamlessly integrate your Convex backend with React applications. These hooks manage subscriptions, loading states, and reactivity automatically.
+
+## Query hooks
+
+### useQuery
+
+Load reactive query data within a React component.
+
+```typescript
+import { useQuery } from "convex/react";
+import { api } from "../convex/_generated/api";
+
+function TaskList() {
+  const tasks = useQuery(api.tasks.list, { completed: false });
+  
+  if (tasks === undefined) return <div>Loading...</div>;
+  
+  return tasks.map((task) => <div key={task._id}>{task.text}</div>);
+}
+```
+
+This hook subscribes to a Convex query and causes a rerender whenever the query result changes. The subscription is managed automatically - it starts when the component mounts and stops when it unmounts.
+
+<ParamField path="query" type="FunctionReference<'query'>" required>
+  A function reference for the public query to run, like `api.dir1.dir2.filename.func`.
+</ParamField>
+
+<ParamField path="args" type="object | 'skip'" required>
+  The arguments object for the query function, or the string `"skip"` to conditionally disable the query.
+</ParamField>
+
+**Returns:** The query result, or `undefined` while loading.
+
+**Throws:** An error if the query encounters an error on the server.
+
+#### Conditional queries
+
+Pass `"skip"` as the second argument to conditionally disable a query:
+
+```typescript
+function MaybeProfile({ userId }: { userId?: Id<"users"> }) {
+  const profile = useQuery(
+    api.users.get,
+    userId ? { userId } : "skip"
+  );
+  
+  if (profile === undefined) return <div>Loading...</div>;
+  return <div>{profile.name}</div>;
+}
+```
+
+### useQueries
+
+Load a variable number of reactive Convex queries.
+
+```typescript
+import { useQueries } from "convex/react";
+import { api } from "../convex/_generated/api";
+
+function MultiChannelView() {
+  const results = useQueries({
+    general: {
+      query: api.messages.list,
+      args: { channel: "#general" }
+    },
+    random: {
+      query: api.messages.list,
+      args: { channel: "#random" }
+    }
+  });
+  
+  return (
+    <div>
+      <Channel messages={results.general} />
+      <Channel messages={results.random} />
+    </div>
+  );
+}
+```
+
+This hook is similar to `useQuery` but allows loading multiple queries, which is useful for a dynamic number of queries without violating React hooks rules.
+
+<ParamField path="queries" type="RequestForQueries" required>
+  An object whose keys are identifiers and values are objects containing `query` (function reference) and `args` (arguments object).
+</ParamField>
+
+**Returns:** An object with the same keys as the input. Values are the query result, `undefined` if still loading, or an `Error` if the query threw an exception.
+
+### usePaginatedQuery
+
+Load data reactively from a paginated query to create a growing list.
+
+```typescript
+import { usePaginatedQuery } from "convex/react";
+import { api } from "../convex/_generated/api";
+
+function MessageList() {
+  const { results, status, isLoading, loadMore } = usePaginatedQuery(
+    api.messages.list,
+    { channel: "#general" },
+    { initialNumItems: 20 }
+  );
+  
+  return (
+    <div>
+      {results.map((msg) => <Message key={msg._id} message={msg} />)}
+      {status === "CanLoadMore" && (
+        <button onClick={() => loadMore(20)}>Load More</button>
+      )}
+      {isLoading && <div>Loading...</div>}
+    </div>
+  );
+}
+```
+
+This hook is designed for "infinite scroll" UIs. It concatenates all pages of results into a single list and manages continuation cursors automatically.
+
+<ParamField path="query" type="PaginatedQueryReference" required>
+  A function reference to a public query that:
+  - Has an argument named `paginationOpts` of type `PaginationOptions`
+  - Returns a `PaginationResult`
+</ParamField>
+
+<ParamField path="args" type="object | 'skip'" required>
+  The arguments object for the query function, excluding the `paginationOpts` property (which is injected by this hook), or `"skip"` to disable.
+</ParamField>
+
+<ParamField path="options" type="object" required>
+  <Expandable title="options properties">
+    <ParamField path="initialNumItems" type="number" required>
+      The number of items to load in the first page.
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+**Returns:** An object containing:
+- `results` - Array of currently loaded results
+- `status` - One of: `"LoadingFirstPage"`, `"CanLoadMore"`, `"LoadingMore"`, or `"Exhausted"`
+- `isLoading` - Boolean indicating if currently loading
+- `loadMore(numItems)` - Function to fetch more results
+
+## Mutation hooks
+
+### useMutation
+
+Construct a function to execute a Convex mutation.
+
+```typescript
+import { useMutation } from "convex/react";
+import { api } from "../convex/_generated/api";
+
+function CreateTask() {
+  const createTask = useMutation(api.tasks.create);
+  
+  const handleClick = async () => {
+    await createTask({ text: "New task", completed: false });
+  };
+  
+  return <button onClick={handleClick}>Add Task</button>;
+}
+```
+
+The returned function is stable across renders (same reference identity), so it can be safely used in dependency arrays and memoization.
+
+<ParamField path="mutation" type="FunctionReference<'mutation'>" required>
+  A function reference for the public mutation to run, like `api.dir1.dir2.filename.func`.
+</ParamField>
+
+**Returns:** A `ReactMutation` function with:
+- `(...args)` - Execute the mutation, returns a promise of the result
+- `withOptimisticUpdate(optimisticUpdate)` - Configure an optimistic update
+
+#### Optimistic updates
+
+Optimistic updates provide instant UI feedback before the server responds:
+
+```typescript
+function ToggleTask({ taskId }: { taskId: Id<"tasks"> }) {
+  const toggleTask = useMutation(api.tasks.toggle)
+    .withOptimisticUpdate((localStore, args) => {
+      const currentValue = localStore.getQuery(api.tasks.get, {
+        id: args.taskId
+      });
+      if (currentValue !== undefined) {
+        localStore.setQuery(api.tasks.get, { id: args.taskId }, {
+          ...currentValue,
+          completed: !currentValue.completed
+        });
+      }
+    });
+  
+  return <button onClick={() => toggleTask({ taskId })}>Toggle</button>;
+}
+```
+
+## Action hooks
+
+### useAction
+
+Construct a function to execute a Convex action.
+
+```typescript
+import { useAction } from "convex/react";
+import { api } from "../convex/_generated/api";
+
+function GenerateSummary() {
+  const generate = useAction(api.ai.generateSummary);
+  
+  const handleClick = async () => {
+    try {
+      const summary = await generate({ text: "Some long text..." });
+      console.log(summary);
+    } catch (error) {
+      console.error("Action failed:", error);
+    }
+  };
+  
+  return <button onClick={handleClick}>Generate</button>;
+}
+```
+
+Actions can call third-party APIs and perform side effects. The returned function is stable across renders.
+
+<Warning>
+  In most cases, calling an action directly from a client is an anti-pattern. Prefer having the client call a mutation that captures the user's intent (by writing to the database) and then schedules the action via `ctx.scheduler.runAfter`. This ensures the intent is durably recorded even if the client disconnects.
+</Warning>
+
+<ParamField path="action" type="FunctionReference<'action'>" required>
+  A function reference for the public action to run, like `api.dir1.dir2.filename.func`.
+</ParamField>
+
+**Returns:** A `ReactAction` function that executes the action and returns a promise of the result.
+
+## Provider and context hooks
+
+### ConvexProvider
+
+Provides an active Convex client to descendants of this component.
+
+```typescript
+import { ConvexProvider, ConvexReactClient } from "convex/react";
+
+const convex = new ConvexReactClient(process.env.NEXT_PUBLIC_CONVEX_URL);
+
+function App() {
+  return (
+    <ConvexProvider client={convex}>
+      <YourApp />
+    </ConvexProvider>
+  );
+}
+```
+
+Wrap your app in this component to use Convex hooks like `useQuery`, `useMutation`, and `useAction`.
+
+<ParamField path="client" type="ConvexReactClient" required>
+  The ConvexReactClient instance to provide.
+</ParamField>
+
+<ParamField path="children" type="ReactNode">
+  Child components that can use Convex hooks.
+</ParamField>
+
+### useConvex
+
+Get the ConvexReactClient within a React component.
+
+```typescript
+import { useConvex } from "convex/react";
+
+function MyComponent() {
+  const convex = useConvex();
+  
+  // Use the client directly
+  const handleClick = async () => {
+    const result = await convex.query(api.myQuery, {});
+  };
+  
+  return <button onClick={handleClick}>Fetch</button>;
+}
+```
+
+This relies on `ConvexProvider` being above in the React component tree.
+
+**Returns:** The active `ConvexReactClient` instance.
+
+**Throws:** An error if not used under `ConvexProvider`.
+
+### useConvexConnectionState
+
+Get the current connection state and subscribe to changes.
+
+```typescript
+import { useConvexConnectionState } from "convex/react";
+
+function ConnectionStatus() {
+  const { isWebSocketConnected, hasInflightRequests } = useConvexConnectionState();
+  
+  return (
+    <div>
+      {isWebSocketConnected ? "Connected" : "Disconnected"}
+      {hasInflightRequests && " (syncing...)"}
+    </div>
+  );
+}
+```
+
+This hook returns the current connection state and automatically rerenders when any part of the connection state changes.
+
+**Returns:** A `ConnectionState` object.
+
+**Throws:** An error if not used under `ConvexProvider`.
+
+## Authentication helpers
+
+### Authenticated
+
+Conditionally render children only when the user is authenticated.
+
+```typescript
+import { Authenticated } from "convex/react";
+
+function App() {
+  return (
+    <Authenticated>
+      <Dashboard />
+    </Authenticated>
+  );
+}
+```
+
+### Unauthenticated
+
+Conditionally render children only when the user is not authenticated.
+
+```typescript
+import { Unauthenticated } from "convex/react";
+
+function App() {
+  return (
+    <Unauthenticated>
+      <LoginPage />
+    </Unauthenticated>
+  );
+}
+```
+
+### AuthLoading
+
+Conditionally render children while authentication status is being determined.
+
+```typescript
+import { AuthLoading } from "convex/react";
+
+function App() {
+  return (
+    <AuthLoading>
+      <LoadingSpinner />
+    </AuthLoading>
+  );
+}
+```

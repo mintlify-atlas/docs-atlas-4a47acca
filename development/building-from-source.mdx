@@ -1,0 +1,135 @@
+---
+title: Building from source
+description: Learn how to build the Convex Backend project from source
+---
+
+## Installing dependencies
+
+You will need to first install the following dependencies if you don't already have them on your machine.
+
+### Required tools
+
+#### Just
+
+[Just](https://github.com/casey/just) is used to execute scripts set up in the `Justfile`.
+
+<CodeGroup>
+```bash Cargo
+cargo install just
+```
+
+```bash Homebrew
+brew install just
+```
+</CodeGroup>
+
+#### Node.js
+
+Make sure you have Node.js version `20.19.5` (specified in `.nvmrc`).
+
+We recommend installing Node.js via [nvm](https://github.com/nvm-sh/nvm#installing-and-updating).
+
+```bash
+nvm use
+```
+
+#### Rust toolchain
+
+The Convex local backend is written in Rust. Install Cargo and the Rust toolchain via [rustup](https://rustup.rs/).
+
+The Rust nightly version specified in `rust-toolchain` will install automatically when you use rustup.
+
+### JavaScript dependencies
+
+The project uses [Rush](https://rushjs.io/) to manage packages in a monorepo.
+
+<Steps>
+  <Step title="Install Rush">
+    ```bash
+    npm clean-install --prefix scripts
+    ```
+  </Step>
+
+  <Step title="Install Convex JavaScript dependencies">
+    ```bash
+    just rush install
+    ```
+  </Step>
+</Steps>
+
+## Building the backend
+
+Build and run the local backend from the source in this repo:
+
+```bash
+just run-local-backend
+```
+
+The backend will start on port 3210.
+
+<Note>
+If this fails with an error "persisted db metadata ...", you might need to erase the local database:
+
+```bash
+rm convex_local_backend.sqlite3
+```
+</Note>
+
+## Provisioning a demo app
+
+This example demonstrates running the backend with the included demo project.
+
+<Steps>
+  <Step title="Start the backend">
+    Run the local backend:
+
+    ```bash
+    just run-local-backend
+    ```
+  </Step>
+
+  <Step title="Set up the demo project">
+    Navigate to the demo project and install dependencies:
+
+    ```bash
+    cd npm-packages/demos/tutorial
+    npm i
+    ```
+  </Step>
+
+  <Step title="Run Convex dev">
+    The Convex CLI watches for changes in the application source code and pushes the code to the backend.
+
+    ```bash
+    just convex dev
+    ```
+
+    The `convex` script in `Justfile` automatically adds appropriate `--url` and `--admin-key` flags to point the CLI to the local backend.
+  </Step>
+
+  <Step title="Run the frontend">
+    Start the demo Vite server:
+
+    ```bash
+    npm run dev:frontend
+    ```
+
+    <Note>
+    Unlike the hosted Convex workflow, don't run the `dev:backend` command since `convex dev` is already running.
+    </Note>
+  </Step>
+</Steps>
+
+## Useful CLI commands
+
+When interacting with your backend, these CLI commands may be helpful:
+
+- `just convex data` - Lists tables in your Convex deployment
+- `just convex env` - Allows you to list/set/update/delete environment variables
+- `just convex logs` - Streams out log lines to the terminal (includes all successful executions if `--success` is passed in)
+- `just convex import` - Allows you to import tables
+- `just convex export` - Allows you to export tables
+
+<Warning>
+If you're using both the local backend and the hosted cloud platform, make sure to run `npx convex dev` or `just convex dev` before you start testing your client. The `dev` command will take care of updating your `.env.local` file with the correct `CONVEX_URL`.
+</Warning>

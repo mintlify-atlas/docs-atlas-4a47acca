@@ -1,0 +1,166 @@
+---
+title: Contributing guidelines
+description: How to contribute to the Convex Backend project
+---
+
+We're excited to see what you build on Convex! Please share any general questions, feature requests, or product feedback in our [Convex Discord Community](https://convex.dev/community).
+
+## Before you contribute
+
+Convex is a fast moving project developed by a dedicated team. We're excited to contribute to the community by releasing this code, but we want to manage expectations as well.
+
+We value:
+
+- A cohesive developer experience for folks building applications across all of our languages and platforms
+- Transparency in how we operate
+
+### Types of contributions
+
+#### Small PRs (encouraged)
+
+Smaller PRs that affect documentation, comments, or small bugfixes are easy to review and integrate.
+
+Examples:
+- Documentation improvements
+- Code comments
+- Small bug fixes
+- Typo corrections
+
+#### Large PRs (contact us first)
+
+For any larger or more fundamental changes, get in touch with us on Discord before you put in too much work to see if it's consistent with our product plans.
+
+<Warning>
+We are generally unlikely to take large or fundamental changes as community contributions. We think carefully about how our APIs contribute to a cohesive product in line with our roadmap, so we cannot promise that larger PRs will get the same level of attention.
+</Warning>
+
+## Development setup
+
+Before contributing, familiarize yourself with the development workflow:
+
+- [Building from source](/development/building-from-source) - Set up your development environment
+- [Local development workflow](/development/local-development) - Learn the day-to-day development process
+- [Running tests](/development/testing) - Ensure your changes work correctly
+
+Additional resources:
+- [Running the dashboard](https://github.com/get-convex/convex-backend/tree/main/npm-packages/dashboard-self-hosted/README.md)
+
+<Note>
+If you just want to self-host Convex and not modify the codebase, we recommend using the pre-built Docker image or binary. See the [self-hosted README](https://github.com/get-convex/convex-backend/tree/main/self-hosted/README.md) for more information.
+</Note>
+
+## Code quality standards
+
+Please ensure that all code follows the project's formatting standards:
+
+### Rust code
+
+Format with [cargo fmt](https://github.com/rust-lang/rustfmt):
+
+```bash
+cargo fmt
+```
+
+The project uses custom rustfmt configuration defined in `rustfmt.toml`.
+
+### Markdown and JavaScript/TypeScript
+
+Format with [dprint](https://dprint.dev/):
+
+```bash
+npx dprint fmt
+```
+
+The project uses dprint with prettier plugin, configured in `dprint.json`.
+
+## Submitting your contribution
+
+<Steps>
+  <Step title="Fork and clone">
+    Fork the repository and clone it to your local machine.
+  </Step>
+
+  <Step title="Create a branch">
+    Create a new branch for your changes:
+
+    ```bash
+    git checkout -b my-contribution
+    ```
+  </Step>
+
+  <Step title="Make your changes">
+    Follow the [local development workflow](/development/local-development) when making changes.
+  </Step>
+
+  <Step title="Format your code">
+    Ensure your code is properly formatted:
+
+    <CodeGroup>
+    ```bash Rust
+    cargo fmt
+    ```
+
+    ```bash TypeScript/Markdown
+    npx dprint fmt
+    ```
+    </CodeGroup>
+  </Step>
+
+  <Step title="Run tests">
+    Make sure all tests pass:
+
+    <CodeGroup>
+    ```bash Rust
+    cargo test -p <package>
+    ```
+
+    ```bash TypeScript
+    cd npm-packages/<package>/
+    npm run test
+    ```
+    </CodeGroup>
+  </Step>
+
+  <Step title="Commit your changes">
+    Write clear, descriptive commit messages:
+
+    ```bash
+    git add .
+    git commit -m "Fix: description of what you fixed"
+    ```
+  </Step>
+
+  <Step title="Push and create PR">
+    Push your branch and create a pull request:
+
+    ```bash
+    git push origin my-contribution
+    ```
+
+    Then open a pull request on GitHub.
+  </Step>
+</Steps>
+
+## License agreement
+
+By submitting pull requests, you confirm that Convex can use, modify, copy, and redistribute the contribution, under the terms of its choice.
+
+## Getting help
+
+If you need help with your contribution:
+
+- Join our [Convex Discord Community](https://convex.dev/community)
+- Ask questions in the appropriate channel
+- Share your ideas and get feedback before starting work on large changes
+
+## Review process
+
+After submitting your PR:
+
+1. The team will review your contribution
+2. You may be asked to make changes
+3. Once approved, your PR will be merged
+
+<Info>
+Review times may vary depending on the size and complexity of the contribution.
+</Info>

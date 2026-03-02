@@ -1,0 +1,531 @@
+---
+title: Data persistence layer
+description: Storage abstraction and persistence backend implementations
+---
+
+The persistence layer provides a pluggable storage abstraction that allows Convex to run on multiple database backends while maintaining ACID guarantees and strong consistency.
+
+## Overview
+
+The `storage` crate (`crates/storage/`) defines the storage abstraction, while backend-specific crates implement it:
+
+- `sqlite` - SQLite backend (default for self-hosted)
+- `postgres` - PostgreSQL backend
+- `mysql` - MySQL/MariaDB backend
+
+## Storage abstraction
+
+### Persistence trait
+
+The core abstraction:
+
+```rust
+#[async_trait]
+trait Persistence: Send + Sync {
+    // Transaction operations
+    async fn begin_transaction(&self) -> Result<TransactionHandle>;
+    async fn commit(&self, tx: TransactionHandle) -> Result<()>;
+    async fn rollback(&self, tx: TransactionHandle) -> Result<()>;
+    
+    // Read operations
+    async fn get(&self, tx: &TransactionHandle, key: &[u8]) -> Result<Option<Vec<u8>>>;
+    async fn scan(&self, tx: &TransactionHandle, range: Range) -> Stream<(Key, Value)>;
+    
+    // Write operations
+    async fn put(&self, tx: &TransactionHandle, key: &[u8], value: &[u8]) -> Result<()>;
+    async fn delete(&self, tx: &TransactionHandle, key: &[u8]) -> Result<()>;
+    
+    // Snapshot operations
+    async fn get_snapshot(&self) -> Result<Snapshot>;
+}
+```
+
+### Design principles
+
+- **Backend agnostic**: Application code doesn't depend on specific backend
+- **Async first**: All operations are async for scalability
+- **Stream-based**: Large results stream to avoid memory bloat
+- **Transactional**: ACID guarantees at the storage layer
+
+## Key-value model
+
+### Data layout
+
+Convex uses a key-value storage model:
+
+```
+Key structure: [table_id][document_id][index_id]
+Value: Serialized document or index entry
+```
+
+### Key encoding
+
+Keys are carefully encoded for:
+
+- Lexicographic ordering
+- Efficient range scans
+- Namespace isolation
+- Index co-location
+
+### Value serialization
+
+Values are serialized using:
+
+- Protocol Buffers for wire format
+- FlexBuffers for document storage
+- Compression for large values
+
+## Transaction support
+
+### Snapshot isolation
+
+All backends provide snapshot isolation:
+
+- Readers see consistent snapshot
+- Writers don't block readers
+- Conflicts detected at commit time
+- Serializable isolation level
+
+### Transaction lifecycle
+
+1. **Begin**: Acquire transaction ID and snapshot
+2. **Execute**: Reads see consistent snapshot, writes are buffered
+3. **Validate**: Check for conflicts with concurrent transactions
+4. **Commit**: Apply writes atomically or rollback
+
+### Conflict detection
+
+Conflicts occur when:
+
+- Two transactions modify the same key
+- Read-write conflicts in serializable mode
+- Schema changes conflict with queries
+
+Conflicts trigger transaction retry.
+
+## SQLite backend
+
+### Implementation
+
+Path: `crates/sqlite/`
+
+Using `rusqlite` for:
+
+- Embedded database
+- Local file storage
+- Simple deployment
+- Great for development and small deployments
+
+### Schema
+
+Simple key-value table:
+
+```sql
+CREATE TABLE documents (
+    key BLOB PRIMARY KEY,
+    value BLOB NOT NULL,
+    timestamp INTEGER NOT NULL
+) WITHOUT ROWID;
+
+CREATE INDEX idx_timestamp ON documents(timestamp);
+```
+
+### Transaction handling
+
+SQLite transactions:
+
+```sql
+BEGIN IMMEDIATE TRANSACTION;
+-- Read and write operations
+COMMIT;
+```
+
+### Performance tuning
+
+Optimizations:
+
+```sql
+PRAGMA journal_mode = WAL;  -- Write-ahead logging
+PRAGMA synchronous = NORMAL; -- Balance durability and speed
+PRAGMA cache_size = -64000;  -- 64MB cache
+PRAGMA temp_store = MEMORY;  -- Temp tables in memory
+```
+
+### Limitations
+
+- Single-writer concurrency
+- File-based storage limits scale
+- Not suitable for distributed deployments
+
+### Use cases
+
+- Local development
+- Self-hosted small deployments
+- Testing and CI
+- Edge deployments
+
+## PostgreSQL backend
+
+### Implementation
+
+Path: `crates/postgres/`
+
+Using `tokio-postgres` for:
+
+- Async operations
+- Connection pooling
+- Prepared statements
+- Scalable deployments
+
+### Schema
+
+Optimized for Postgres:
+
+```sql
+CREATE TABLE documents (
+    key BYTEA PRIMARY KEY,
+    value BYTEA NOT NULL,
+    timestamp BIGINT NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX idx_timestamp ON documents(timestamp);
+CREATE INDEX idx_created_at ON documents(created_at);
+```
+
+### Connection pooling
+
+Managed connection pool:
+
+```rust
+let pool = deadpool_postgres::Pool::new(
+    manager,
+    PoolConfig::new(max_connections)
+);
+```
+
+### Transaction isolation
+
+Postgres serializable transactions:
+
+```sql
+BEGIN TRANSACTION ISOLATION LEVEL SERIALIZABLE;
+-- Operations
+COMMIT;
+```
+
+### Performance features
+
+- Prepared statement caching
+- Connection pooling
+- Async I/O throughout
+- Efficient batch operations
+
+### Configuration
+
+Connection string:
+
+```
+postgres://user:pass@host:5432/dbname?sslmode=require
+```
+
+Environment variables:
+
+```bash
+CONVEX_POSTGRES_HOST=localhost
+CONVEX_POSTGRES_PORT=5432
+CONVEX_POSTGRES_USER=convex
+CONVEX_POSTGRES_PASSWORD=secret
+CONVEX_POSTGRES_DATABASE=convex_db
+```
+
+### Scaling considerations
+
+- Horizontal read scaling with replicas
+- Connection pooling for high concurrency
+- Partitioning for large datasets
+- Vacuum and maintenance required
+
+## MySQL backend
+
+### Implementation
+
+Path: `crates/mysql/`
+
+Using `mysql_async` for:
+
+- Async MySQL operations
+- Compatible with MySQL and MariaDB
+- Wide deployment support
+
+### Schema
+
+MySQL-optimized schema:
+
+```sql
+CREATE TABLE documents (
+    `key` VARBINARY(767) PRIMARY KEY,
+    `value` LONGBLOB NOT NULL,
+    `timestamp` BIGINT NOT NULL,
+    INDEX idx_timestamp (timestamp)
+) ENGINE=InnoDB;
+```
+
+### Transaction handling
+
+InnoDB transactions:
+
+```sql
+START TRANSACTION WITH CONSISTENT SNAPSHOT;
+-- Operations
+COMMIT;
+```
+
+### Connection management
+
+Connection pool configuration:
+
+```rust
+let opts = OptsBuilder::new()
+    .ip_or_hostname(host)
+    .tcp_port(port)
+    .user(Some(user))
+    .pass(Some(pass))
+    .db_name(Some(database));
+
+let pool = Pool::new(opts);
+```
+
+### Performance tuning
+
+InnoDB settings:
+
+```ini
+innodb_buffer_pool_size = 4G
+innodb_log_file_size = 512M
+innodb_flush_log_at_trx_commit = 1
+innodb_flush_method = O_DIRECT
+```
+
+## Storage selection
+
+### Choosing a backend
+
+Decision factors:
+
+| Backend | Best For | Deployment |
+|---------|----------|------------|
+| SQLite | Development, small apps | Single server |
+| Postgres | Production, scalability | Managed DB or cloud |
+| MySQL | Existing infrastructure | Managed DB or cloud |
+
+### Configuration
+
+Backend is selected via connection string:
+
+```bash
+# SQLite
+--persistence sqlite:///path/to/db.sqlite3
+
+# Postgres
+--persistence postgres://host/dbname
+
+# MySQL
+--persistence mysql://host/dbname
+```
+
+## Persistence layer features
+
+### Document versioning
+
+Each write includes:
+
+- Timestamp of the write
+- Transaction ID
+- Document version
+
+### Garbage collection
+
+Old versions are cleaned up:
+
+- Configurable retention period
+- Background GC process
+- Doesn't block reads/writes
+
+### Backup and restore
+
+Supported operations:
+
+- Point-in-time snapshots
+- Export to JSON or CSV
+- Import from external sources
+- Streaming export for large datasets
+
+### Point-in-time queries
+
+Query historical data:
+
+```typescript
+// Query as of specific timestamp
+db.query("tableName").at(timestamp);
+```
+
+## Performance characteristics
+
+### Read performance
+
+- Single key lookup: Sub-millisecond
+- Range scan: Streaming, bounded by network
+- Index scan: Optimized with database indexes
+
+### Write performance
+
+- Single write: Milliseconds
+- Batch writes: More efficient per-item
+- Transaction commit: Durable write to disk
+
+### Scalability limits
+
+Typical limits:
+
+- SQLite: ~100 concurrent readers, 1 writer
+- Postgres: 1000s of connections with pooling
+- MySQL: Similar to Postgres
+
+## Monitoring and observability
+
+### Metrics
+
+Tracked metrics:
+
+- Transaction latency
+- Query performance
+- Connection pool utilization
+- Storage size growth
+- Read/write throughput
+
+### Health checks
+
+Persistence health:
+
+```rust
+async fn health_check(storage: &Storage) -> Result<HealthStatus> {
+    // Test read and write
+    let tx = storage.begin_transaction().await?;
+    storage.put(&tx, test_key, test_value).await?;
+    storage.commit(tx).await?;
+    Ok(HealthStatus::Healthy)
+}
+```
+
+### Debugging
+
+Slow query logging:
+
+- Queries exceeding threshold are logged
+- Stack traces for investigation
+- Query plan analysis
+
+## Data integrity
+
+### Checksums
+
+Data corruption detection:
+
+- Checksums for stored values
+- Verification on read
+- Automatic repair or error reporting
+
+### Durability guarantees
+
+All backends ensure:
+
+- Writes survive process crashes
+- ACID compliance
+- No partial writes visible
+
+### Consistency verification
+
+Background verification:
+
+- Index consistency checks
+- Referential integrity
+- Schema compliance
+
+## Testing
+
+### Backend tests
+
+Each backend has comprehensive tests:
+
+```rust
+#[tokio::test]
+async fn test_transaction_isolation() {
+    let db = setup_test_db().await;
+    // Test concurrent transactions
+    let tx1 = db.begin_transaction().await.unwrap();
+    let tx2 = db.begin_transaction().await.unwrap();
+    // Verify isolation
+}
+```
+
+### Consistency tests
+
+Verify ACID properties:
+
+- Atomicity: All-or-nothing commits
+- Consistency: Constraints are maintained
+- Isolation: Concurrent transactions don't interfere
+- Durability: Committed data persists
+
+### Performance benchmarks
+
+Benchmark suite:
+
+```rust
+fn bench_write_throughput(c: &mut Criterion) {
+    c.bench_function("write_1000_docs", |b| {
+        b.iter(|| {
+            // Benchmark write performance
+        });
+    });
+}
+```
+
+## Migration and upgrades
+
+### Schema migrations
+
+Managed migrations:
+
+```sql
+-- Migration 001: Initial schema
+CREATE TABLE documents (...);
+
+-- Migration 002: Add index
+CREATE INDEX idx_new ON documents(...);
+```
+
+### Data migration
+
+Moving between backends:
+
+1. Export from source backend
+2. Transform data if needed
+3. Import to target backend
+4. Verify data integrity
+5. Switch traffic
+
+### Version compatibility
+
+Backward compatibility:
+
+- Old versions can read new format
+- Graceful handling of unknown fields
+- Migration path documented
+
+## Next steps
+
+- [Database engine component](/architecture/components/database-engine) - Layer built on persistence
+- [Indexing system](/architecture/indexing) - Index storage and management
+- [Rust backend architecture](/architecture/rust-backend) - Overall architecture

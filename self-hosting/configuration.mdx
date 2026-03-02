@@ -1,0 +1,383 @@
+---
+title: Runtime configuration
+description: Configure environment variables and runtime options for your self-hosted Convex deployment
+---
+
+This guide covers all available configuration options for self-hosted Convex deployments.
+
+## Environment variables
+
+All configuration is done through environment variables. These can be set in:
+
+- A `.env` file next to your `docker-compose.yml`
+- Directly in your `docker-compose.yml` file
+- Through your hosting platform's configuration (Fly.io secrets, Railway variables, etc.)
+
+## Core configuration
+
+### Instance configuration
+
+<ParamField path="INSTANCE_NAME" type="string" default="convex-self-hosted">
+  Name of your Convex instance. This determines the database name (with `-` replaced by `_`).
+</ParamField>
+
+<ParamField path="INSTANCE_SECRET" type="string">
+  Secret key for your instance. Keep this very safe and only accessible from the backend.
+  Required when running the binary directly.
+</ParamField>
+
+### URL configuration
+
+<ParamField path="CONVEX_CLOUD_ORIGIN" type="string" default="http://127.0.0.1:3210">
+  URL of the Convex API as accessed by clients and the frontend.
+
+  ```bash
+  CONVEX_CLOUD_ORIGIN='https://api.my-domain.com'
+  ```
+</ParamField>
+
+<ParamField path="CONVEX_SITE_ORIGIN" type="string" default="http://127.0.0.1:3211">
+  URL of Convex HTTP actions as accessed by clients and the frontend.
+
+  ```bash
+  CONVEX_SITE_ORIGIN='https://my-domain.com'
+  ```
+</ParamField>
+
+<ParamField path="NEXT_PUBLIC_DEPLOYMENT_URL" type="string" default="http://127.0.0.1:3210">
+  URL of the Convex API as accessed by the dashboard (browser).
+
+  ```bash
+  NEXT_PUBLIC_DEPLOYMENT_URL='https://api.my-domain.com'
+  ```
+</ParamField>
+
+### Port configuration
+
+<ParamField path="PORT" type="number" default="3210">
+  Port for the Convex backend API.
+</ParamField>
+
+<ParamField path="SITE_PROXY_PORT" type="number" default="3211">
+  Port for HTTP actions.
+</ParamField>
+
+<ParamField path="DASHBOARD_PORT" type="number" default="6791">
+  Port for the dashboard web interface.
+</ParamField>
+
+## Database configuration
+
+<ParamField path="DATABASE_URL" type="string">
+  Generic database connection string. For specific databases, use `POSTGRES_URL` or `MYSQL_URL` instead.
+</ParamField>
+
+<ParamField path="POSTGRES_URL" type="string">
+  PostgreSQL connection string without database name and query parameters.
+
+  ```bash
+  POSTGRES_URL='postgresql://user:password@host.neon.tech'
+  ```
+
+  The backend will connect to a database named after your instance (e.g., `convex_self_hosted`).
+</ParamField>
+
+<ParamField path="MYSQL_URL" type="string">
+  MySQL connection string without database name and query parameters.
+
+  ```bash
+  MYSQL_URL='mysql://user:password@aws.connect.psdb.cloud'
+  ```
+</ParamField>
+
+<ParamField path="DO_NOT_REQUIRE_SSL" type="boolean" default="false">
+  Disable SSL requirement for database connections. Useful for local development.
+
+  <Warning>
+    Only set this to `true` for local development. Production deployments should use SSL.
+  </Warning>
+
+  ```bash
+  DO_NOT_REQUIRE_SSL=1
+  ```
+</ParamField>
+
+## S3 storage configuration
+
+<ParamField path="AWS_REGION" type="string">
+  AWS region for S3 buckets.
+
+  ```bash
+  AWS_REGION='us-east-1'
+  ```
+</ParamField>
+
+<ParamField path="AWS_ACCESS_KEY_ID" type="string">
+  AWS access key ID for S3 authentication.
+</ParamField>
+
+<ParamField path="AWS_SECRET_ACCESS_KEY" type="string">
+  AWS secret access key for S3 authentication.
+
+  <Warning>
+    Never commit AWS credentials to source control. Use environment variables or secrets management.
+  </Warning>
+</ParamField>
+
+<ParamField path="AWS_SESSION_TOKEN" type="string">
+  AWS session token for temporary credentials.
+</ParamField>
+
+<ParamField path="S3_ENDPOINT_URL" type="string">
+  Custom S3 endpoint URL. Required for S3-compatible services like Cloudflare R2.
+
+  ```bash
+  # Cloudflare R2 example
+  S3_ENDPOINT_URL='https://account-id.r2.cloudflarestorage.com'
+  ```
+</ParamField>
+
+<ParamField path="S3_STORAGE_EXPORTS_BUCKET" type="string">
+  S3 bucket name for snapshot exports.
+
+  ```bash
+  S3_STORAGE_EXPORTS_BUCKET='convex-snapshot-exports'
+  ```
+</ParamField>
+
+<ParamField path="S3_STORAGE_SNAPSHOT_IMPORTS_BUCKET" type="string">
+  S3 bucket name for snapshot imports.
+
+  ```bash
+  S3_STORAGE_SNAPSHOT_IMPORTS_BUCKET='convex-snapshot-imports'
+  ```
+</ParamField>
+
+<ParamField path="S3_STORAGE_MODULES_BUCKET" type="string">
+  S3 bucket name for function modules.
+
+  ```bash
+  S3_STORAGE_MODULES_BUCKET='convex-modules'
+  ```
+</ParamField>
+
+<ParamField path="S3_STORAGE_FILES_BUCKET" type="string">
+  S3 bucket name for user files.
+
+  ```bash
+  S3_STORAGE_FILES_BUCKET='convex-user-files'
+  ```
+</ParamField>
+
+<ParamField path="S3_STORAGE_SEARCH_BUCKET" type="string">
+  S3 bucket name for search indexes.
+
+  ```bash
+  S3_STORAGE_SEARCH_BUCKET='convex-search-indexes'
+  ```
+</ParamField>
+
+<ParamField path="AWS_S3_FORCE_PATH_STYLE" type="boolean">
+  Force path-style S3 URLs instead of virtual-hosted style. Required for some S3-compatible services.
+</ParamField>
+
+<ParamField path="AWS_S3_DISABLE_SSE" type="boolean">
+  Disable server-side encryption for S3 objects.
+</ParamField>
+
+<ParamField path="AWS_S3_DISABLE_CHECKSUMS" type="boolean">
+  Disable checksums for S3 operations.
+</ParamField>
+
+## Performance tuning
+
+### Concurrency limits
+
+<ParamField path="APPLICATION_MAX_CONCURRENT_QUERIES" type="number" default="16">
+  Maximum concurrent queries allowed.
+
+  ```bash
+  APPLICATION_MAX_CONCURRENT_QUERIES=32
+  ```
+
+  <Warning>
+    Increasing concurrency increases system load. Monitor your system and tune based on your hardware and workload.
+  </Warning>
+</ParamField>
+
+<ParamField path="APPLICATION_MAX_CONCURRENT_MUTATIONS" type="number" default="16">
+  Maximum concurrent mutations allowed.
+
+  ```bash
+  APPLICATION_MAX_CONCURRENT_MUTATIONS=32
+  ```
+</ParamField>
+
+<ParamField path="APPLICATION_MAX_CONCURRENT_NODE_ACTIONS" type="number" default="16">
+  Maximum concurrent Node.js actions allowed.
+
+  ```bash
+  APPLICATION_MAX_CONCURRENT_NODE_ACTIONS=32
+  ```
+</ParamField>
+
+<ParamField path="APPLICATION_MAX_CONCURRENT_V8_ACTIONS" type="number" default="16">
+  Maximum concurrent V8 actions allowed.
+
+  ```bash
+  APPLICATION_MAX_CONCURRENT_V8_ACTIONS=32
+  ```
+</ParamField>
+
+### Timeout configuration
+
+<ParamField path="ACTIONS_USER_TIMEOUT_SECS" type="number">
+  Timeout in seconds for action execution.
+</ParamField>
+
+<ParamField path="HTTP_SERVER_TIMEOUT_SECONDS" type="number">
+  HTTP server timeout in seconds.
+</ParamField>
+
+### Data retention
+
+<ParamField path="DOCUMENT_RETENTION_DELAY" type="number" default="172800">
+  Document retention delay in seconds. Default is 2 days (172800 seconds) for self-hosted deployments.
+
+  ```bash
+  # Keep documents for 7 days
+  DOCUMENT_RETENTION_DELAY=604800
+  ```
+</ParamField>
+
+## Logging and monitoring
+
+<ParamField path="RUST_LOG" type="string" default="info">
+  Log level for the backend. Options: `error`, `warn`, `info`, `debug`, `trace`.
+
+  ```bash
+  RUST_LOG='debug'
+  ```
+</ParamField>
+
+<ParamField path="RUST_BACKTRACE" type="string">
+  Enable Rust backtraces for debugging.
+
+  ```bash
+  RUST_BACKTRACE='1'
+  ```
+</ParamField>
+
+<ParamField path="REDACT_LOGS_TO_CLIENT" type="boolean" default="false">
+  Redact log information to prevent leaking PII.
+
+  ```bash
+  REDACT_LOGS_TO_CLIENT=true
+  ```
+
+  Cloud-hosted Convex automatically redacts logs. Enable this for similar behavior in self-hosted deployments.
+</ParamField>
+
+<ParamField path="DISABLE_BEACON" type="boolean" default="false">
+  Disable the anonymous usage beacon.
+
+  ```bash
+  DISABLE_BEACON=true
+  ```
+
+  Self-hosted builds include a beacon to help Convex understand usage. The information is anonymous and minimal.
+</ParamField>
+
+## Dashboard configuration
+
+<ParamField path="NEXT_PUBLIC_LOAD_MONACO_INTERNALLY" type="boolean" default="false">
+  Load Monaco editor from local assets instead of CDN.
+
+  ```bash
+  NEXT_PUBLIC_LOAD_MONACO_INTERNALLY=true
+  ```
+</ParamField>
+
+## Version configuration
+
+<ParamField path="CONVEX_RELEASE_VERSION_DEV" type="string">
+  Override the Convex release version for development.
+</ParamField>
+
+## Example configurations
+
+### Local development
+
+```bash .env
+PORT=3210
+SITE_PROXY_PORT=3211
+DASHBOARD_PORT=6791
+RUST_LOG=debug
+```
+
+### Production with PostgreSQL and S3
+
+```bash .env
+# URLs
+CONVEX_CLOUD_ORIGIN='https://api.my-domain.com'
+CONVEX_SITE_ORIGIN='https://my-domain.com'
+NEXT_PUBLIC_DEPLOYMENT_URL='https://api.my-domain.com'
+
+# Database
+POSTGRES_URL='postgresql://user:password@db.region.provider.com'
+INSTANCE_NAME='my-production-instance'
+
+# S3 Storage
+AWS_REGION='us-east-1'
+AWS_ACCESS_KEY_ID='AKIAIOSFODNN7EXAMPLE'
+AWS_SECRET_ACCESS_KEY='wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY'
+S3_STORAGE_EXPORTS_BUCKET='my-convex-exports'
+S3_STORAGE_SNAPSHOT_IMPORTS_BUCKET='my-convex-imports'
+S3_STORAGE_MODULES_BUCKET='my-convex-modules'
+S3_STORAGE_FILES_BUCKET='my-convex-files'
+S3_STORAGE_SEARCH_BUCKET='my-convex-search'
+
+# Performance
+APPLICATION_MAX_CONCURRENT_QUERIES=32
+APPLICATION_MAX_CONCURRENT_MUTATIONS=32
+
+# Security
+REDACT_LOGS_TO_CLIENT=true
+RUST_LOG=info
+```
+
+### Production with Cloudflare R2
+
+```bash .env
+# S3-compatible storage (R2)
+AWS_REGION='auto'
+AWS_ACCESS_KEY_ID='your-r2-access-key-id'
+AWS_SECRET_ACCESS_KEY='your-r2-secret-access-key'
+S3_ENDPOINT_URL='https://account-id.r2.cloudflarestorage.com'
+AWS_S3_FORCE_PATH_STYLE=true
+
+S3_STORAGE_EXPORTS_BUCKET='convex-exports'
+S3_STORAGE_SNAPSHOT_IMPORTS_BUCKET='convex-imports'
+S3_STORAGE_MODULES_BUCKET='convex-modules'
+S3_STORAGE_FILES_BUCKET='convex-files'
+S3_STORAGE_SEARCH_BUCKET='convex-search'
+```
+
+## Advanced tuning
+
+For detailed configuration options beyond the commonly used variables, see the [knobs.rs source file](https://github.com/get-convex/convex-backend/blob/main/crates/common/src/knobs.rs). These knobs are configurable via environment variables but require careful tuning based on your specific workload and hardware.
+
+<Warning>
+  Advanced knobs can significantly impact performance. Only adjust these if you understand the implications and have profiled your workload.
+</Warning>
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Database setup" icon="database" href="/self-hosting/database-setup">
+    Connect to PostgreSQL or MySQL
+  </Card>
+  <Card title="Storage" icon="cloud" href="/self-hosting/storage">
+    Configure S3-compatible storage
+  </Card>
+</CardGroup>

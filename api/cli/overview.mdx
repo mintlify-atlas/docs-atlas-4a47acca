@@ -1,0 +1,104 @@
+---
+title: CLI overview
+description: Command-line interface for Convex development and deployment
+---
+
+The Convex CLI provides a complete set of tools for developing, deploying, and managing your Convex backend. Use it to develop locally, push code to production, manage environment variables, and inspect your database.
+
+## Installation
+
+The Convex CLI is available through the `convex` npm package:
+
+```bash
+npm install convex
+```
+
+Run commands using `npx`:
+
+```bash
+npx convex dev
+```
+
+## Available commands
+
+### Development
+
+- `convex dev` - Develop against a deployment, watching for changes
+- `convex deploy` - Deploy to your production deployment
+- `convex run` - Run a Convex function from the command line
+
+### Data management
+
+- `convex import` - Import data from a file to your deployment
+- `convex export` - Export data from your deployment to a ZIP file
+- `convex data` - List tables and print data from your database
+
+### Environment variables
+
+- `convex env set` - Set environment variables on your deployment
+- `convex env get` - Print an environment variable's value
+- `convex env list` - List all environment variables
+- `convex env remove` - Unset an environment variable
+
+### Utilities
+
+- `convex dashboard` - Open the Convex dashboard in your browser
+- `convex logs` - Stream logs from your Convex functions
+- `convex docs` - Open Convex documentation
+- `convex login` - Log in to your Convex account
+- `convex logout` - Log out from your Convex account
+
+## Requirements
+
+- Node.js version 18.0.0 or higher (recommended: Node.js 20.x or newer)
+- npm version 7.0.0 or higher
+
+## Deployment selection
+
+Many commands support options to select which deployment to target:
+
+<ParamField path="--prod" type="boolean">
+  Target this project's production deployment instead of the dev deployment.
+</ParamField>
+
+<ParamField path="--preview-name" type="string">
+  Target the preview deployment with the given name.
+</ParamField>
+
+<ParamField path="--url" type="string">
+  Target the deployment at the given URL. Use with self-hosted deployments or to specify a deployment directly.
+</ParamField>
+
+<ParamField path="--admin-key" type="string">
+  Admin key for authentication when using `--url`.
+</ParamField>
+
+<ParamField path="--env-file" type="string">
+  Path to a custom file of environment variables for choosing the deployment (e.g., `CONVEX_DEPLOYMENT` or `CONVEX_URL`).
+</ParamField>
+
+## Environment variables
+
+The CLI reads several environment variables to configure its behavior:
+
+- `CONVEX_DEPLOYMENT` - Deployment name to use
+- `CONVEX_DEPLOY_KEY` - Deploy key for CI/CD deployments
+- `CONVEX_URL` - Self-hosted deployment URL
+- `CONVEX_ADMIN_KEY` - Self-hosted admin key
+- `HTTPS_PROXY` / `HTTP_PROXY` - HTTP proxy for requests
+
+## Global options
+
+Most commands support these global options:
+
+<ParamField path="-v, --verbose" type="boolean">
+  Show full listing of changes and detailed output.
+</ParamField>
+
+<ParamField path="-h, --help" type="boolean">
+  Display help information for the command.
+</ParamField>
+
+<ParamField path="--version" type="boolean">
+  Display the CLI version.
+</ParamField>

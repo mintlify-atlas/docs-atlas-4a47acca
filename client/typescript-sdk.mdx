@@ -1,0 +1,251 @@
+---
+title: TypeScript/JavaScript SDK
+description: Core Convex client for TypeScript and JavaScript applications
+---
+
+The Convex TypeScript/JavaScript SDK provides clients for accessing Convex backends from any JavaScript environment.
+
+## Installation
+
+<CodeGroup>
+```bash npm
+npm install convex
+```
+
+```bash yarn
+yarn add convex
+```
+
+```bash pnpm
+pnpm add convex
+```
+</CodeGroup>
+
+## Client types
+
+Convex provides multiple client types for different use cases:
+
+- **ConvexReactClient** - For React applications with reactive subscriptions
+- **ConvexClient** - For browser applications with WebSocket support
+- **ConvexHttpClient** - For server-side code or non-reactive webapps using HTTP
+
+## ConvexHttpClient
+
+A stateful HTTP client for executing queries, mutations, and actions. Appropriate for server-side code (like serverless functions) or non-reactive web applications.
+
+### Creating a client
+
+```typescript
+import { ConvexHttpClient } from "convex/browser";
+
+const client = new ConvexHttpClient("https://small-mouse-123.convex.cloud");
+```
+
+### Constructor options
+
+```typescript
+new ConvexHttpClient(address, {
+  skipConvexDeploymentUrlCheck?: boolean,
+  logger?: Logger | boolean,
+  auth?: string,
+  fetch?: typeof globalThis.fetch
+});
+```
+
+- `address` - The URL of your Convex deployment
+- `skipConvexDeploymentUrlCheck` - Skip URL validation (useful for self-hosted backends)
+- `logger` - Custom logger or `false` to disable logging
+- `auth` - JWT token for authentication
+- `fetch` - Custom fetch implementation
+
+### Executing queries
+
+```typescript
+import { api } from "./convex/_generated/api";
+
+const tasks = await client.query(api.tasks.list, { completed: false });
+```
+
+### Executing mutations
+
+Mutations are queued by default to ensure ordered execution:
+
+```typescript
+const taskId = await client.mutation(api.tasks.create, {
+  text: "New task"
+});
+```
+
+To skip the queue and execute immediately:
+
+```typescript
+await client.mutation(api.tasks.create, 
+  { text: "New task" },
+  { skipQueue: true }
+);
+```
+
+### Executing actions
+
+```typescript
+const summary = await client.action(api.ai.generateSummary, {
+  text: "Some long text..."
+});
+```
+
+### Authentication
+
+Set an authentication token:
+
+```typescript
+client.setAuth("eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...");
+```
+
+Clear authentication:
+
+```typescript
+client.clearAuth();
+```
+
+## ConvexClient
+
+A WebSocket-based client for subscribing to queries and executing mutations and actions. Provides reactive updates but without React-specific features.
+
+### Creating a client
+
+```typescript
+import { ConvexClient } from "convex/browser";
+
+const client = new ConvexClient("https://small-mouse-123.convex.cloud");
+```
+
+### Constructor options
+
+```typescript
+new ConvexClient(address, {
+  disabled?: boolean,
+  unsavedChangesWarning?: boolean,
+  // ... other BaseConvexClientOptions
+});
+```
+
+- `disabled` - Disable subscriptions (useful for server-side rendering)
+- `unsavedChangesWarning` - Prompt users about unsaved changes
+
+### Subscribing to queries
+
+```typescript
+const unsubscribe = client.onUpdate(
+  api.messages.list,
+  { channel: "#general" },
+  (messages) => {
+    console.log(messages);
+  }
+);
+
+// Stop listening
+unsubscribe();
+```
+
+The return value is both a function and an object:
+
+```typescript
+const { unsubscribe, getCurrentValue } = client.onUpdate(
+  api.messages.list,
+  {},
+  (messages) => {
+    console.log(messages);
+  }
+);
+
+// Get current value
+const current = getCurrentValue();
+
+// Unsubscribe
+unsubscribe();
+```
+
+### Executing mutations and actions
+
+```typescript
+// Execute a mutation
+await client.mutation(api.tasks.create, { text: "New task" });
+
+// Execute an action
+await client.action(api.ai.generate, { prompt: "Hello" });
+```
+
+### One-time query execution
+
+```typescript
+const tasks = await client.query(api.tasks.list, { completed: false });
+```
+
+### Authentication
+
+```typescript
+client.setAuth(
+  async () => {
+    // Return JWT token or null if unavailable
+    return await getAuthToken();
+  },
+  (isAuthenticated) => {
+    console.log("Auth status changed:", isAuthenticated);
+  }
+);
+```
+
+### Connection state
+
+```typescript
+const state = client.connectionState();
+console.log(state); // { isConnected: true, ... }
+
+// Subscribe to connection state changes
+const unsubscribe = client.subscribeToConnectionState((state) => {
+  console.log("Connection state:", state);
+});
+```
+
+### Closing the client
+
+```typescript
+await client.close();
+```
+
+## Type safety
+
+All clients use generated TypeScript types for complete type safety:
+
+```typescript
+import { api } from "./convex/_generated/api";
+
+// TypeScript knows the exact argument and return types
+const tasks = await client.query(api.tasks.list, {
+  completed: false // Type-checked
+});
+// tasks has the correct type automatically
+```
+
+## Error handling
+
+```typescript
+try {
+  await client.mutation(api.tasks.create, { text: "New task" });
+} catch (error) {
+  if (error instanceof ConvexError) {
+    console.error("Convex error:", error.data);
+  } else {
+    console.error("Network or other error:", error);
+  }
+}
+```
+
+## Best practices
+
+- Use `ConvexHttpClient` for server-side code and serverless functions
+- Use `ConvexClient` for non-React browser applications that need reactivity
+- Use `ConvexReactClient` (see React documentation) for React applications
+- Always handle errors when executing mutations and actions
+- Close clients when done to clean up resources
+- Store deployment URLs in environment variables

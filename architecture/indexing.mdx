@@ -1,0 +1,598 @@
+---
+title: Indexing system
+description: Index types, implementation, and query optimization in Convex
+---
+
+The indexing system provides efficient data access through multiple index types, including B-tree indexes for range queries, text search indexes, and vector indexes for similarity search.
+
+## Overview
+
+Indexing is implemented across multiple crates:
+
+- `indexing` - Core index abstraction and B-tree indexes
+- `search` - Full-text and vector search indexes
+- `text_search` - Text search specifics
+- `vector` - Vector operations and types
+
+The database crate coordinates index updates and query planning.
+
+## Index types
+
+### Database indexes (B-tree)
+
+Standard ordered indexes:
+
+```typescript
+// Define an index in schema
+defineSchema({
+  tasks: defineTable({
+    title: v.string(),
+    status: v.string(),
+    priority: v.number(),
+  })
+    .index("by_status", ["status"])
+    .index("by_status_priority", ["status", "priority"]),
+});
+```
+
+Properties:
+
+- Ordered by index key(s)
+- Support range queries
+- Efficient point lookups
+- Maintained automatically
+
+### Text search indexes
+
+Full-text search powered by Tantivy:
+
+```typescript
+// Define search index
+defineSchema({
+  documents: defineTable({
+    title: v.string(),
+    body: v.string(),
+  }).searchIndex("search_body", {
+    searchField: "body",
+    filterFields: ["title"],
+  }),
+});
+```
+
+Features:
+
+- Tokenization and stemming
+- BM25 scoring
+- Fuzzy matching
+- Phrase queries
+- Field boosting
+
+### Vector indexes
+
+Similarity search using Qdrant:
+
+```typescript
+// Define vector index
+defineSchema({
+  embeddings: defineTable({
+    vector: v.array(v.number()),
+    text: v.string(),
+  }).vectorIndex("by_vector", {
+    vectorField: "vector",
+    dimensions: 1536,
+    filterFields: ["text"],
+  }),
+});
+```
+
+Distance metrics:
+
+- Cosine similarity
+- Euclidean distance
+- Dot product
+
+## Core indexing crate
+
+### Index registry
+
+Path: `crates/indexing/`
+
+Manages index metadata:
+
+```rust
+pub struct IndexRegistry {
+    indexes: BTreeMap<IndexId, IndexMetadata>,
+}
+
+pub struct IndexMetadata {
+    name: IndexName,
+    fields: Vec<FieldPath>,
+    index_type: IndexType,
+    state: IndexState,
+}
+
+pub enum IndexState {
+    Backfilling { progress: f64 },
+    Enabled,
+    Disabled,
+}
+```
+
+### Index structure
+
+B-tree implementation:
+
+```rust
+pub struct BTreeIndex {
+    // Map from index key to document IDs
+    entries: BTreeMap<IndexKey, BTreeSet<DocumentId>>,
+}
+
+pub struct IndexKey {
+    // Encoded field values
+    values: Vec<ConvexValue>,
+}
+```
+
+### Range queries
+
+Efficient range scans:
+
+```rust
+impl BTreeIndex {
+    pub fn range(
+        &self,
+        start: &IndexKey,
+        end: &IndexKey,
+    ) -> impl Iterator<Item = DocumentId> {
+        self.entries
+            .range(start..end)
+            .flat_map(|(_, ids)| ids.iter().copied())
+    }
+}
+```
+
+## Search crate architecture
+
+### Overview
+
+Path: `crates/search/`
+
+Integrates multiple search engines:
+
+- Tantivy for text search
+- Qdrant segment library for vector search
+- Unified search interface
+
+### Text search implementation
+
+#### Index building
+
+```rust
+pub struct TextIndexWriter {
+    tantivy_index: tantivy::Index,
+    writer: IndexWriter,
+}
+
+impl TextIndexWriter {
+    pub fn add_document(
+        &mut self,
+        doc_id: DocumentId,
+        fields: BTreeMap<FieldPath, String>,
+    ) -> Result<()> {
+        let mut doc = Document::new();
+        doc.add_field(id_field, doc_id.to_string());
+        for (field, text) in fields {
+            doc.add_field(text_field, text);
+        }
+        self.writer.add_document(doc)?;
+        Ok(())
+    }
+}
+```
+
+#### Query execution
+
+```rust
+pub struct TextSearchQuery {
+    query: String,
+    filters: BTreeMap<FieldPath, ConvexValue>,
+    limit: usize,
+}
+
+impl TextSearchEngine {
+    pub fn search(
+        &self,
+        query: &TextSearchQuery,
+    ) -> Result<Vec<(DocumentId, f64)>> {
+        let parsed = self.query_parser.parse(&query.query)?;
+        let searcher = self.reader.searcher();
+        let results = searcher.search(&parsed, &TopDocs::with_limit(query.limit))?;
+        
+        Ok(results
+            .into_iter()
+            .map(|(score, doc_address)| {
+                let doc = searcher.doc(doc_address)?;
+                let id = extract_id(&doc)?;
+                Ok((id, score as f64))
+            })
+            .collect::<Result<_>>()?)
+    }
+}
+```
+
+### Vector search implementation
+
+#### Index structure
+
+```rust
+pub struct VectorIndex {
+    segment: qdrant_segment::Segment,
+    dimensions: usize,
+    distance_metric: DistanceMetric,
+}
+
+pub enum DistanceMetric {
+    Cosine,
+    Euclidean,
+    DotProduct,
+}
+```
+
+#### Vector operations
+
+```rust
+impl VectorIndex {
+    pub fn insert(
+        &mut self,
+        doc_id: DocumentId,
+        vector: Vec<f32>,
+    ) -> Result<()> {
+        assert_eq!(vector.len(), self.dimensions);
+        self.segment.upsert_point(
+            doc_id.into(),
+            vector.into(),
+        )?;
+        Ok(())
+    }
+    
+    pub fn search(
+        &self,
+        query_vector: Vec<f32>,
+        limit: usize,
+    ) -> Result<Vec<(DocumentId, f64)>> {
+        let results = self.segment.search(
+            query_vector,
+            limit,
+            None, // No filter
+        )?;
+        
+        Ok(results
+            .into_iter()
+            .map(|r| (r.id.into(), r.score))
+            .collect())
+    }
+}
+```
+
+## Index maintenance
+
+### Automatic updates
+
+Indexes are updated automatically:
+
+1. **On write**: Document insert/update/delete triggers index update
+2. **Transactional**: Index updates are part of transaction
+3. **Consistent**: Indexes always reflect committed state
+4. **Asynchronous**: Search indexes update in background
+
+### Backfilling
+
+When a new index is created:
+
+```rust
+pub struct IndexBackfiller {
+    index_id: IndexId,
+    progress: f64,
+}
+
+impl IndexBackfiller {
+    pub async fn backfill(&mut self, db: &Database) -> Result<()> {
+        let documents = db.table_iterator(self.table_name).await?;
+        let total = documents.size_hint().0;
+        let mut count = 0;
+        
+        for doc in documents {
+            self.add_to_index(doc).await?;
+            count += 1;
+            self.progress = count as f64 / total as f64;
+        }
+        
+        self.mark_enabled().await?;
+        Ok(())
+    }
+}
+```
+
+Backfilling happens:
+
+- In the background without blocking
+- With progress tracking
+- Resumable on failure
+- Index becomes queryable when complete
+
+### Index workers
+
+Background workers maintain indexes:
+
+```rust
+pub struct IndexWorker {
+    db: Database,
+    search_engine: SearchEngine,
+}
+
+impl IndexWorker {
+    pub async fn run(&mut self) -> Result<()> {
+        loop {
+            // Wait for index update signal
+            let update = self.next_update().await?;
+            
+            match update {
+                IndexUpdate::Document(doc_id, change) => {
+                    self.update_indexes(doc_id, change).await?;
+                }
+                IndexUpdate::NewIndex(index_id) => {
+                    self.backfill_index(index_id).await?;
+                }
+            }
+        }
+    }
+}
+```
+
+## Query optimization
+
+### Index selection
+
+Query planner chooses best index:
+
+```rust
+pub struct QueryPlanner {
+    indexes: IndexRegistry,
+}
+
+impl QueryPlanner {
+    pub fn choose_index(
+        &self,
+        table: &TableName,
+        filter: &QueryFilter,
+    ) -> Option<IndexId> {
+        let candidates = self.indexes.for_table(table);
+        
+        // Score each index
+        let scored = candidates
+            .map(|idx| (idx, self.score_index(idx, filter)))
+            .collect::<Vec<_>>();
+        
+        // Return best index
+        scored.into_iter()
+            .max_by_key(|(_, score)| *score)
+            .map(|(idx, _)| idx)
+    }
+    
+    fn score_index(&self, index: &Index, filter: &QueryFilter) -> u32 {
+        // Exact match on all fields = best
+        // Prefix match = good
+        // No match = 0 (table scan)
+        // ...
+    }
+}
+```
+
+### Covering indexes
+
+When index contains all needed fields:
+
+```rust
+// Index covers query - no document fetch needed
+query.index("by_status_priority")
+  .filter(q => q.eq("status", "active"))
+  .map(doc => ({ status: doc.status, priority: doc.priority }))
+```
+
+### Query pushdown
+
+Filters are pushed to index layer:
+
+```typescript
+// Filter applied during index scan
+db.query("tasks")
+  .withIndex("by_status")
+  .filter(q => 
+    q.eq(q.field("status"), "active") &&
+    q.gt(q.field("priority"), 5)
+  )
+```
+
+## Performance characteristics
+
+### B-tree indexes
+
+- **Lookup**: O(log n) average case
+- **Range scan**: O(log n + k) where k is result size
+- **Insert/update**: O(log n)
+- **Space**: O(n * key_size)
+
+### Text search
+
+- **Indexing**: O(n * avg_document_length)
+- **Query**: Sub-linear with inverted index
+- **Space**: ~2-3x document size
+- **Relevance**: BM25 scoring
+
+### Vector search
+
+- **Indexing**: O(n log n) with HNSW
+- **Query**: O(log n) approximate
+- **Space**: O(n * dimensions)
+- **Accuracy**: Configurable precision/recall tradeoff
+
+## Index storage
+
+### Persistence
+
+Indexes are stored differently:
+
+- **B-tree indexes**: In main database alongside documents
+- **Text indexes**: Separate Tantivy directory
+- **Vector indexes**: Qdrant segment files
+
+### Storage layout
+
+```
+convex_data/
+├── documents.db           # Main database
+├── indexes/
+│   ├── text/
+│   │   └── {index_id}/   # Tantivy index files
+│   └── vector/
+│       └── {index_id}/   # Qdrant segment files
+```
+
+### Compaction
+
+Search indexes are periodically compacted:
+
+- Merge segments in Tantivy
+- Optimize HNSW graph in vector indexes
+- Remove deleted documents
+- Reclaim space
+
+## Monitoring and debugging
+
+### Index statistics
+
+Per-index metrics:
+
+```rust
+pub struct IndexStats {
+    num_entries: u64,
+    size_bytes: u64,
+    last_update: Timestamp,
+    backfill_progress: Option<f64>,
+}
+```
+
+### Query explain
+
+Explain query execution:
+
+```typescript
+const plan = await db.query("tasks")
+  .filter(q => q.eq("status", "active"))
+  .explain();
+
+// Returns:
+{
+  indexUsed: "by_status",
+  estimatedCost: 10,
+  scanRange: ["active", "active"],
+}
+```
+
+### Slow query logging
+
+Queries not using indexes are logged:
+
+```
+WARN: Table scan on table 'tasks' (1000 documents)
+Consider adding index on fields: ['status', 'priority']
+```
+
+## Best practices
+
+### Index design
+
+1. **Index common queries**: Create indexes for frequent access patterns
+2. **Compound indexes**: Use multi-field indexes for complex queries
+3. **Covering indexes**: Include all fields needed by query
+4. **Avoid over-indexing**: Each index has storage and maintenance cost
+
+### Search index tuning
+
+Text search optimization:
+
+- Choose appropriate tokenizer
+- Configure stemming for language
+- Tune BM25 parameters for domain
+- Use filters to narrow results
+
+Vector search optimization:
+
+- Choose right distance metric
+- Tune vector dimensions
+- Balance accuracy vs performance
+- Use metadata filtering
+
+### Query patterns
+
+Efficient queries:
+
+```typescript
+// Good: Uses index
+db.query("tasks")
+  .withIndex("by_status")
+  .filter(q => q.eq(q.field("status"), "active"))
+
+// Bad: Table scan
+db.query("tasks")
+  .filter(q => q.eq(q.field("status"), "active"))
+
+// Good: Index covers query
+db.query("tasks")
+  .withIndex("by_status_priority")
+  .filter(q => 
+    q.eq(q.field("status"), "active") &&
+    q.gt(q.field("priority"), 5)
+  )
+```
+
+## Testing
+
+### Index correctness tests
+
+```rust
+#[tokio::test]
+async fn test_index_consistency() {
+    let db = setup_test_db().await;
+    
+    // Insert documents
+    let id = db.insert("tasks", doc).await?;
+    
+    // Query via index
+    let results = db.query("tasks")
+        .with_index("by_status")
+        .collect()
+        .await?;
+    
+    assert!(results.contains(&id));
+}
+```
+
+### Performance benchmarks
+
+```rust
+fn bench_index_query(c: &mut Criterion) {
+    c.bench_function("query_with_index", |b| {
+        b.iter(|| {
+            // Benchmark indexed query
+        });
+    });
+}
+```
+
+## Next steps
+
+- [Database engine component](/architecture/components/database-engine) - Query execution
+- [Data persistence layer](/architecture/persistence) - Storage backend
+- [Rust backend architecture](/architecture/rust-backend) - Overall system

@@ -1,0 +1,222 @@
+---
+title: Database operations and querying
+description: Read and write data in Convex with atomic transactions and reactive queries
+---
+
+Convex provides a fully transactional database with reactive queries. All reads and writes within a single mutation execute atomically.
+
+## Database reader
+
+The `GenericDatabaseReader` interface provides read-only access to the database in queries. Access it via `ctx.db` in query and mutation functions.
+
+### Get a document by ID
+
+Fetch a single document from the database by its ID:
+
+```typescript
+import { query } from "./_generated/server";
+import { v } from "convex/values";
+
+export const getUser = query({
+  args: { userId: v.id("users") },
+  handler: async (ctx, args) => {
+    const user = await ctx.db.get(args.userId);
+    return user; // Returns the document or null if not found
+  },
+});
+```
+
+You can also specify the table name explicitly:
+
+```typescript
+const user = await ctx.db.get("users", userId);
+```
+
+<ParamField path="id" type="GenericId<TableName>">
+  The ID of the document to fetch from the database.
+</ParamField>
+
+<ParamField path="table" type="string" optional>
+  The name of the table to fetch the document from (optional first parameter).
+</ParamField>
+
+**Returns:** The document at the given ID, or `null` if it no longer exists.
+
+### Query documents
+
+Begin a query for a given table. Queries don't execute immediately - they're lazily evaluated when you consume the results.
+
+```typescript
+const messages = await ctx.db
+  .query("messages")
+  .withIndex("by_channel", (q) => q.eq("channelId", channelId))
+  .order("desc")
+  .take(50);
+```
+
+<ParamField path="tableName" type="string">
+  The name of the table to query.
+</ParamField>
+
+**Returns:** A `QueryInitializer` object to start building a query.
+
+### System tables
+
+Access system tables like `_storage` (file metadata) and `_scheduled_functions` (scheduled function state):
+
+```typescript
+// Get file metadata from the _storage system table:
+const metadata = await ctx.db.system.get(storageId);
+// metadata has: _id, _creationTime, contentType, sha256, size
+```
+
+### Normalize ID
+
+Returns the string ID format for an ID in a given table, or null if the ID is from a different table or is not valid:
+
+```typescript
+const normalizedId = ctx.db.normalizeId("users", idString);
+```
+
+<ParamField path="tableName" type="string">
+  The name of the table.
+</ParamField>
+
+<ParamField path="id" type="string">
+  The ID string to normalize.
+</ParamField>
+
+**Returns:** The normalized `GenericId<TableName>` or `null`.
+
+## Database writer
+
+The `GenericDatabaseWriter` interface extends `GenericDatabaseReader` with write operations. Available as `ctx.db` in mutations.
+
+All reads and writes within a single mutation are executed **atomically** - you never have to worry about partial writes leaving your data in an inconsistent state.
+
+### Insert
+
+Insert a new document into a table:
+
+```typescript
+import { mutation } from "./_generated/server";
+import { v } from "convex/values";
+
+export const createTask = mutation({
+  args: { text: v.string() },
+  handler: async (ctx, args) => {
+    const taskId = await ctx.db.insert("tasks", {
+      text: args.text,
+      completed: false,
+    });
+    return taskId;
+  },
+});
+```
+
+<ParamField path="table" type="string">
+  The name of the table to insert into.
+</ParamField>
+
+<ParamField path="value" type="object">
+  The document to insert. System fields (`_id`, `_creationTime`) are added automatically and should not be included.
+</ParamField>
+
+**Returns:** The `GenericId` of the newly created document.
+
+### Patch
+
+Patch an existing document, shallow merging it with the given partial document:
+
+```typescript
+// Update only the "completed" field, leaving other fields unchanged:
+await ctx.db.patch(taskId, { completed: true });
+
+// Remove an optional field by setting it to undefined:
+await ctx.db.patch(taskId, { assignee: undefined });
+```
+
+New fields are added. Existing fields are overwritten. Fields set to `undefined` are removed. Fields not specified in the patch are left unchanged.
+
+<ParamField path="id" type="GenericId<TableName>">
+  The ID of the document to patch.
+</ParamField>
+
+<ParamField path="value" type="Partial<Document>">
+  The partial document to merge into the existing document.
+</ParamField>
+
+**Tip:** Use `patch` for partial updates. Use `replace` when you want to overwrite the entire document.
+
+**Throws:** An error if the document does not exist.
+
+### Replace
+
+Replace the entire value of an existing document, overwriting its old value completely:
+
+```typescript
+// Replace the entire document:
+await ctx.db.replace(userId, {
+  name: "New Name",
+  email: "new@example.com",
+});
+```
+
+Unlike `patch`, which does a shallow merge, `replace` overwrites the entire document. Any fields not included in the new value will be removed (except system fields `_id` and `_creationTime`).
+
+<ParamField path="id" type="GenericId<TableName>">
+  The ID of the document to replace.
+</ParamField>
+
+<ParamField path="value" type="Document">
+  The new document. System fields can be omitted.
+</ParamField>
+
+**Throws:** An error if the document does not exist.
+
+### Delete
+
+Delete an existing document:
+
+```typescript
+await ctx.db.delete(taskId);
+```
+
+To delete multiple documents, collect them first, then delete each one:
+
+```typescript
+const oldTasks = await ctx.db
+  .query("tasks")
+  .withIndex("by_completed", (q) => q.eq("completed", true))
+  .collect();
+
+for (const task of oldTasks) {
+  await ctx.db.delete(task._id);
+}
+```
+
+<ParamField path="id" type="GenericId<TableName>">
+  The ID of the document to remove.
+</ParamField>
+
+**Note:** Convex queries do not support `.delete()` directly on query results. Collect documents first, then delete each one individually.
+
+## Table scoped API
+
+Scope the database to a specific table for cleaner syntax:
+
+```typescript
+const users = ctx.db.table("users");
+
+// All operations are now scoped to the users table:
+const user = await users.get(userId);
+const allUsers = await users.query().collect();
+await users.insert({ name: "Alice", email: "alice@example.com" });
+```
+
+## Best practices
+
+- **Use `.withIndex()` instead of `.filter()`** for efficient queries. Define indexes in your schema for fields you query frequently.
+- **Avoid `.collect()` on unbounded queries** - it loads all matching documents into memory. Prefer `.first()`, `.unique()`, `.take(n)`, or pagination.
+- **All mutations are atomic** - reads and writes within a single mutation see a consistent snapshot and commit together.
+- **System fields** like `_id` and `_creationTime` are automatically managed - don't include them when inserting documents.

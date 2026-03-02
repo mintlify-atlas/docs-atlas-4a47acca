@@ -1,0 +1,420 @@
+---
+title: Vector search capabilities
+description: Implement semantic search and similarity matching with vector embeddings
+---
+
+Convex provides vector search for semantic similarity matching using embeddings. Vector search enables finding similar content based on meaning rather than exact keyword matches.
+
+## Vector indexes
+
+Define vector indexes in your schema to enable vector search:
+
+```typescript
+import { defineSchema, defineTable } from "convex/server";
+import { v } from "convex/values";
+
+export default defineSchema({
+  documents: defineTable({
+    title: v.string(),
+    content: v.string(),
+    embedding: v.array(v.number()),
+    category: v.string(),
+    authorId: v.string(),
+  }).vectorIndex("by_embedding", {
+    vectorField: "embedding",
+    dimensions: 1536,
+    filterFields: ["category", "authorId"],
+  }),
+});
+```
+
+A vector index requires:
+
+<ParamField path="vectorField" type="string">
+  The field containing the vector embedding. Must be an array of numbers.
+</ParamField>
+
+<ParamField path="dimensions" type="number">
+  The number of dimensions in the vector. All vectors in this field must have exactly this length.
+</ParamField>
+
+<ParamField path="filterFields" type="string[]" optional>
+  Additional fields to filter on using equality filters during vector search.
+</ParamField>
+
+## Generating embeddings
+
+Before performing vector search, you need to generate embeddings for your content. This typically involves calling an embedding API like OpenAI's:
+
+```typescript
+import { action } from "./_generated/server";
+import { internal } from "./_generated/api";
+import { v } from "convex/values";
+import OpenAI from "openai";
+
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY,
+});
+
+export const addDocument = action({
+  args: {
+    title: v.string(),
+    content: v.string(),
+  },
+  handler: async (ctx, args) => {
+    // Generate embedding from OpenAI
+    const embeddingResponse = await openai.embeddings.create({
+      model: "text-embedding-3-small",
+      input: args.content,
+    });
+
+    const embedding = embeddingResponse.data[0].embedding;
+
+    // Store document with embedding
+    await ctx.runMutation(internal.documents.insert, {
+      title: args.title,
+      content: args.content,
+      embedding,
+    });
+  },
+});
+```
+
+## Vector search query
+
+Perform vector search using `ctx.vectorSearch()`:
+
+```typescript
+import { action } from "./_generated/server";
+import { internal } from "./_generated/api";
+import { v } from "convex/values";
+import OpenAI from "openai";
+
+const openai = new OpenAI();
+
+export const searchSimilar = action({
+  args: { query: v.string() },
+  handler: async (ctx, args) => {
+    // Generate embedding for the search query
+    const embeddingResponse = await openai.embeddings.create({
+      model: "text-embedding-3-small",
+      input: args.query,
+    });
+
+    const queryEmbedding = embeddingResponse.data[0].embedding;
+
+    // Perform vector search
+    const results = await ctx.vectorSearch("documents", "by_embedding", {
+      vector: queryEmbedding,
+      limit: 10,
+    });
+
+    // results is an array of { _id, _score }
+    // Fetch the full documents
+    const documents = await Promise.all(
+      results.map((result) =>
+        ctx.runQuery(internal.documents.get, { id: result._id })
+      )
+    );
+
+    return documents;
+  },
+});
+```
+
+### Vector search parameters
+
+The `VectorSearchQuery` object configures the search:
+
+<ParamField path="vector" type="number[]">
+  The query vector. Must have the same length as the `dimensions` of the index. Vector search returns documents most similar to this vector.
+</ParamField>
+
+<ParamField path="limit" type="number" optional>
+  The number of results to return. Must be between 1 and 256 inclusive. Defaults to 10.
+</ParamField>
+
+<ParamField path="filter" type="function" optional>
+  An optional filter expression to restrict results. Built using the `VectorFilterBuilder`.
+</ParamField>
+
+### Vector search results
+
+Vector search returns an array of objects containing:
+
+<ParamField path="_id" type="Id<TableName>">
+  The ID of the matching document.
+</ParamField>
+
+<ParamField path="_score" type="number">
+  The similarity score. Higher scores indicate greater similarity.
+</ParamField>
+
+Results are sorted by similarity score in descending order (most similar first).
+
+## Filtering vector search
+
+Filter vector search results using the `VectorFilterBuilder`:
+
+```typescript
+const results = await ctx.vectorSearch("documents", "by_embedding", {
+  vector: queryEmbedding,
+  limit: 20,
+  filter: (q) => q.eq("category", "tech"),
+});
+```
+
+### Vector filter builder
+
+The `VectorFilterBuilder` provides filtering methods:
+
+#### eq (equality)
+
+Filter documents where a field equals a value:
+
+```typescript
+filter: (q) => q.eq("category", "tech")
+```
+
+<ParamField path="fieldName" type="string">
+  The field name to filter on. Must be listed in the index's `filterFields`.
+</ParamField>
+
+<ParamField path="value" type="any">
+  The value to compare against. Type must match the field type.
+</ParamField>
+
+#### or (logical OR)
+
+Combine multiple conditions with OR logic:
+
+```typescript
+filter: (q) => q.or(
+  q.eq("category", "tech"),
+  q.eq("category", "science")
+)
+```
+
+You can combine multiple `eq` filters:
+
+```typescript
+filter: (q) => q.or(
+  q.eq("authorId", userId1),
+  q.eq("authorId", userId2),
+  q.eq("authorId", userId3)
+)
+```
+
+**Note:** Vector search filters only support `eq()` and `or()`. Other comparison operators (gt, lt, etc.) and `and()` are not available.
+
+## Common patterns
+
+### Semantic search with filters
+
+```typescript
+export const searchDocumentsByAuthor = action({
+  args: {
+    query: v.string(),
+    authorId: v.string(),
+  },
+  handler: async (ctx, args) => {
+    // Generate query embedding
+    const embeddingResponse = await openai.embeddings.create({
+      model: "text-embedding-3-small",
+      input: args.query,
+    });
+
+    const queryEmbedding = embeddingResponse.data[0].embedding;
+
+    // Search with author filter
+    const results = await ctx.vectorSearch("documents", "by_embedding", {
+      vector: queryEmbedding,
+      limit: 20,
+      filter: (q) => q.eq("authorId", args.authorId),
+    });
+
+    return results;
+  },
+});
+```
+
+### Find similar documents
+
+```typescript
+export const findSimilar = action({
+  args: { documentId: v.id("documents") },
+  handler: async (ctx, args) => {
+    // Get the document's embedding
+    const document = await ctx.runQuery(internal.documents.get, {
+      id: args.documentId,
+    });
+
+    if (!document) {
+      return [];
+    }
+
+    // Find similar documents using its embedding
+    const results = await ctx.vectorSearch("documents", "by_embedding", {
+      vector: document.embedding,
+      limit: 11, // Get 11 to exclude the document itself
+    });
+
+    // Filter out the original document
+    return results.filter((r) => r._id !== args.documentId).slice(0, 10);
+  },
+});
+```
+
+### Multi-category search
+
+```typescript
+export const searchMultipleCategories = action({
+  args: {
+    query: v.string(),
+    categories: v.array(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const embeddingResponse = await openai.embeddings.create({
+      model: "text-embedding-3-small",
+      input: args.query,
+    });
+
+    const queryEmbedding = embeddingResponse.data[0].embedding;
+
+    // Search with OR filter for multiple categories
+    const results = await ctx.vectorSearch("documents", "by_embedding", {
+      vector: queryEmbedding,
+      limit: 50,
+      filter: (q) =>
+        q.or(...args.categories.map((cat) => q.eq("category", cat))),
+    });
+
+    return results;
+  },
+});
+```
+
+### Recommendation system
+
+```typescript
+export const recommendForUser = action({
+  args: { userId: v.string() },
+  handler: async (ctx, args) => {
+    // Get user's recently viewed documents
+    const recentViews = await ctx.runQuery(internal.analytics.getRecentViews, {
+      userId: args.userId,
+    });
+
+    if (recentViews.length === 0) {
+      return [];
+    }
+
+    // Average the embeddings of recently viewed documents
+    const avgEmbedding = new Array(1536).fill(0);
+    for (const doc of recentViews) {
+      for (let i = 0; i < 1536; i++) {
+        avgEmbedding[i] += doc.embedding[i] / recentViews.length;
+      }
+    }
+
+    // Find similar documents
+    const recommendations = await ctx.vectorSearch(
+      "documents",
+      "by_embedding",
+      {
+        vector: avgEmbedding,
+        limit: 20,
+      }
+    );
+
+    // Filter out already viewed documents
+    const viewedIds = new Set(recentViews.map((v) => v._id));
+    return recommendations.filter((r) => !viewedIds.has(r._id));
+  },
+});
+```
+
+### Hybrid search (vector + keyword)
+
+Combine vector search with full-text search for better results:
+
+```typescript
+export const hybridSearch = action({
+  args: { query: v.string() },
+  handler: async (ctx, args) => {
+    // Vector search
+    const embeddingResponse = await openai.embeddings.create({
+      model: "text-embedding-3-small",
+      input: args.query,
+    });
+
+    const vectorResults = await ctx.vectorSearch("documents", "by_embedding", {
+      vector: embeddingResponse.data[0].embedding,
+      limit: 20,
+    });
+
+    // Keyword search
+    const keywordResults = await ctx.runQuery(
+      internal.documents.searchByKeyword,
+      { query: args.query }
+    );
+
+    // Combine and deduplicate results
+    const combinedResults = new Map();
+
+    // Add vector results with score
+    for (const result of vectorResults) {
+      combinedResults.set(result._id, {
+        ...result,
+        vectorScore: result._score,
+      });
+    }
+
+    // Add keyword results
+    for (const doc of keywordResults) {
+      if (combinedResults.has(doc._id)) {
+        combinedResults.get(doc._id).keywordMatch = true;
+      } else {
+        combinedResults.set(doc._id, { ...doc, keywordMatch: true });
+      }
+    }
+
+    return Array.from(combinedResults.values());
+  },
+});
+```
+
+## Best practices
+
+- **Use actions for vector search** - Vector search is typically called from actions because generating embeddings requires external API calls.
+- **Match embedding dimensions** - Ensure the `dimensions` in your index matches the embedding model you use (e.g., 1536 for OpenAI's text-embedding-3-small).
+- **Cache embeddings** - Store embeddings in your database to avoid regenerating them on every query.
+- **Limit results appropriately** - Vector search can return up to 256 results, but most use cases need 10-50.
+- **Use filter fields** - Define `filterFields` in your index for common filters like category or author.
+- **Consider hybrid search** - Combine vector search with keyword search for the best results.
+- **Normalize vectors** - Some embedding models return normalized vectors; others don't. Consistency improves search quality.
+- **Handle missing embeddings** - Documents without embeddings won't appear in vector search results.
+
+## Limitations
+
+- **Fixed dimensions** - All vectors in a field must have the exact same number of dimensions specified in the index.
+- **Limited filtering** - Only equality (`eq`) and OR (`or`) filters are supported. No range queries or AND logic.
+- **Maximum limit** - Can return at most 256 results per query.
+- **Actions only** - Vector search is only available in actions, not in queries or mutations.
+- **No ordering control** - Results are always ordered by similarity score (descending).
+
+## Embedding models
+
+Popular embedding models and their dimensions:
+
+- **OpenAI text-embedding-3-small**: 1536 dimensions
+- **OpenAI text-embedding-3-large**: 3072 dimensions
+- **OpenAI text-embedding-ada-002**: 1536 dimensions
+- **Cohere embed-english-v3.0**: 1024 dimensions
+- **Cohere embed-multilingual-v3.0**: 1024 dimensions
+
+Choose an embedding model based on your needs:
+- **Quality**: Larger models (3-large) provide better semantic understanding
+- **Cost**: Smaller models (3-small) are cheaper per token
+- **Speed**: Smaller models generate embeddings faster
+- **Language**: Use multilingual models for non-English content

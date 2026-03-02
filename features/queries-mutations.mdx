@@ -1,0 +1,333 @@
+---
+title: Writing queries and mutations
+description: Define reactive queries and transactional mutations for your Convex backend
+---
+
+Convex functions come in three types: queries (read-only), mutations (read-write), and actions (can call external APIs). This guide covers queries and mutations.
+
+## Queries
+
+Queries are read-only functions that fetch data from the database. They are **reactive** - when used with `useQuery` on the client, they automatically re-run when data changes.
+
+### Basic query
+
+```typescript
+import { query } from "./_generated/server";
+import { v } from "convex/values";
+
+export const listTasks = query({
+  args: {},
+  returns: v.array(
+    v.object({
+      _id: v.id("tasks"),
+      _creationTime: v.number(),
+      text: v.string(),
+      completed: v.boolean(),
+    })
+  ),
+  handler: async (ctx, args) => {
+    // ctx.db: read-only database access
+    return await ctx.db.query("tasks").order("desc").take(100);
+  },
+});
+```
+
+### Query context
+
+The first argument to every query is the `QueryCtx`, which provides:
+
+<ParamField path="ctx.db" type="GenericDatabaseReader">
+  Read-only database access. Use `ctx.db.get()` to fetch by ID or `ctx.db.query()` to query multiple documents.
+</ParamField>
+
+<ParamField path="ctx.auth" type="Auth">
+  Information about the authenticated user. Call `await ctx.auth.getUserIdentity()` to get the current user's identity, or `null` if not authenticated.
+</ParamField>
+
+<ParamField path="ctx.storage" type="StorageReader">
+  Read-only file storage access. Use `ctx.storage.getUrl(storageId)` to get a URL for a stored file.
+</ParamField>
+
+<ParamField path="ctx.runQuery" type="function">
+  Call another query within the same read snapshot. Useful for code organization, though extracting a helper function is often simpler.
+</ParamField>
+
+### Query methods
+
+Queries support various methods for retrieving results:
+
+#### Full table scan
+
+Scan all documents in a table (use sparingly on small tables only):
+
+```typescript
+const allSettings = await ctx.db.query("settings").fullTableScan().collect();
+```
+
+This query's cost is relative to the size of the entire table. Only use on tables that will stay small (a few hundred to a few thousand documents).
+
+#### Index queries
+
+Query using an index for efficient lookups:
+
+```typescript
+const messages = await ctx.db
+  .query("messages")
+  .withIndex("by_channel", (q) => q.eq("channelId", channelId))
+  .order("desc")
+  .take(50);
+```
+
+<ParamField path="indexName" type="string">
+  The name of the index to query (must be defined in your schema).
+</ParamField>
+
+<ParamField path="indexRange" type="function" optional>
+  An optional function that builds an index range using the `IndexRangeBuilder`. Describes which documents to consider.
+</ParamField>
+
+**Returns:** A `Query` that yields documents in index order.
+
+#### Search index queries
+
+Perform full-text search against a search index:
+
+```typescript
+const results = await ctx.db
+  .query("posts")
+  .withSearchIndex("search_title", (q) =>
+    q.search("title", searchQuery).eq("category", "tech")
+  )
+  .take(20);
+```
+
+Documents are returned in relevance order based on how well they match the search text.
+
+### Ordering and filtering
+
+#### Order
+
+Define the order of query results:
+
+```typescript
+const tasks = await ctx.db.query("tasks").order("desc").collect();
+```
+
+<ParamField path="order" type="'asc' | 'desc'">
+  The order to return results. Use `"asc"` for ascending (default) or `"desc"` for descending.
+</ParamField>
+
+#### Filter
+
+Filter query output with a predicate:
+
+```typescript
+const activeTasks = await ctx.db
+  .query("tasks")
+  .filter((q) => q.eq(q.field("completed"), false))
+  .collect();
+```
+
+**Important:** Prefer using `.withIndex()` over `.filter()` whenever possible. Filters scan all documents matched so far and discard non-matches, while indexes efficiently skip non-matching documents.
+
+### Consuming results
+
+Queries are lazily evaluated. No work is done until you consume the results:
+
+#### collect
+
+Return all results as an array:
+
+```typescript
+const allTasks = await ctx.db.query("tasks").collect();
+```
+
+**Warning:** This loads every matching document into memory. Only use when the result set is tightly bounded.
+
+#### take
+
+Return the first `n` results:
+
+```typescript
+const recentMessages = await ctx.db.query("messages").order("desc").take(50);
+```
+
+<ParamField path="n" type="number">
+  The number of items to take.
+</ParamField>
+
+#### first
+
+Return the first result or null:
+
+```typescript
+const task = await ctx.db.query("tasks").first();
+```
+
+**Returns:** The first document or `null` if the query returned no results.
+
+#### unique
+
+Return the singular result, throwing if there's more than one:
+
+```typescript
+const user = await ctx.db
+  .query("users")
+  .withIndex("by_email", (q) => q.eq("email", "alice@example.com"))
+  .unique();
+```
+
+Use this when you expect exactly zero or one result, for example when querying by a unique field.
+
+**Returns:** The single result or `null` if none exists.
+
+**Throws:** An error if the query returns more than one result.
+
+#### Async iteration
+
+Process large result sets without loading all into memory:
+
+```typescript
+for await (const task of ctx.db.query("tasks")) {
+  // Process each task
+}
+```
+
+#### Pagination
+
+Load pages of results with a cursor:
+
+```typescript
+const { page, continueCursor, isDone } = await ctx.db
+  .query("messages")
+  .paginate(paginationOpts);
+```
+
+<ParamField path="paginationOpts" type="PaginationOptions">
+  An object containing `numItems` (number of items to load) and `cursor` (where to start from).
+</ParamField>
+
+**Returns:** A `PaginationResult` containing the page of results and a cursor to continue paginating.
+
+## Mutations
+
+Mutations are read-write functions that modify database state. All operations within a mutation execute **atomically** - they either all succeed or all fail together.
+
+### Basic mutation
+
+```typescript
+import { mutation } from "./_generated/server";
+import { internal } from "./_generated/api";
+import { v } from "convex/values";
+
+export const createTask = mutation({
+  args: { text: v.string() },
+  returns: v.id("tasks"),
+  handler: async (ctx, args) => {
+    // ctx.db: read and write documents
+    const taskId = await ctx.db.insert("tasks", {
+      text: args.text,
+      completed: false,
+    });
+
+    // ctx.scheduler: schedule functions for later
+    await ctx.scheduler.runAfter(0, internal.notifications.send, { taskId });
+
+    return taskId;
+  },
+});
+```
+
+### Mutation context
+
+The first argument to every mutation is the `MutationCtx`, which provides:
+
+<ParamField path="ctx.db" type="GenericDatabaseWriter">
+  Read and write database access. Use `insert()`, `patch()`, `replace()`, and `delete()` to modify data.
+</ParamField>
+
+<ParamField path="ctx.auth" type="Auth">
+  Information about the authenticated user.
+</ParamField>
+
+<ParamField path="ctx.storage" type="StorageWriter">
+  File storage with read and write access. Generate upload URLs, get file URLs, or delete files.
+</ParamField>
+
+<ParamField path="ctx.scheduler" type="Scheduler">
+  Schedule mutations or actions to run in the future using `runAfter()` or `runAt()`.
+</ParamField>
+
+<ParamField path="ctx.runQuery" type="function">
+  Call a query within the same transaction. The query sees a consistent snapshot of the database.
+</ParamField>
+
+<ParamField path="ctx.runMutation" type="function">
+  Call a mutation within a sub-transaction. If it throws, its writes are rolled back.
+</ParamField>
+
+### Running queries and mutations
+
+You can call other queries and mutations from within a mutation:
+
+```typescript
+// Call a query:
+const user = await ctx.runQuery(internal.users.getUser, { userId });
+
+// Call a mutation:
+await ctx.runMutation(internal.orders.updateStatus, { orderId, status: "shipped" });
+```
+
+**Note:** Often you can extract shared logic into a helper function instead. `runQuery` and `runMutation` incur overhead of running argument and return value validation, and creating a new isolated JS context.
+
+## Validation
+
+Both queries and mutations require argument validators using the `v` object:
+
+```typescript
+import { v } from "convex/values";
+
+export const updateTask = mutation({
+  args: {
+    taskId: v.id("tasks"),
+    text: v.optional(v.string()),
+    completed: v.optional(v.boolean()),
+  },
+  handler: async (ctx, args) => {
+    // args are fully type-safe and validated
+  },
+});
+```
+
+Available validators:
+- `v.string()`, `v.number()`, `v.boolean()`, `v.null()`
+- `v.id("tableName")` - table IDs
+- `v.array(validator)` - arrays
+- `v.object({ ... })` - objects with specific fields
+- `v.optional(validator)` - optional fields
+- `v.union(v1, v2, ...)` - union types
+- `v.any()` - any value (use sparingly)
+
+## Function visibility
+
+Functions can be public or internal:
+
+```typescript
+import { mutation, internalMutation } from "./_generated/server";
+
+// Public - can be called from clients
+export const publicMutation = mutation({ ... });
+
+// Internal - can only be called from other Convex functions
+export const internalMutation = internalMutation({ ... });
+```
+
+Use internal functions for sensitive operations that should only be callable from scheduled functions or other backend code.
+
+## Best practices
+
+- **Prefer indexes over filters** - Indexes are much more efficient than scanning and filtering.
+- **Keep mutations focused** - Each mutation should do one logical operation atomically.
+- **Use helper functions** - Extract shared logic instead of calling `runQuery`/`runMutation` when possible.
+- **Validate inputs** - Always use validators for type safety and runtime validation.
+- **Avoid unbounded queries** - Use `.take()`, `.first()`, or pagination instead of `.collect()` on queries that could grow large.

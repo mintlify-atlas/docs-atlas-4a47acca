@@ -1,0 +1,312 @@
+---
+title: "ConvexReactClient"
+description: "A Convex client for use within React applications"
+---
+
+## Overview
+
+`ConvexReactClient` is a stateful client that loads reactive queries and executes mutations over a WebSocket connection to your Convex backend.
+
+## Constructor
+
+Create a new `ConvexReactClient` instance to connect to your Convex deployment.
+
+```typescript
+import { ConvexReactClient } from "convex/react";
+
+const convex = new ConvexReactClient(process.env.NEXT_PUBLIC_CONVEX_URL);
+```
+
+### Parameters
+
+<ParamField path="address" type="string" required>
+  The URL of your Convex deployment, typically provided by an environment variable.
+  For example: `https://small-mouse-123.convex.cloud`
+</ParamField>
+
+<ParamField path="options" type="ConvexReactClientOptions">
+  Optional configuration object for the client.
+  
+  <Expandable title="options properties">
+    <ParamField path="unsavedChangesWarning" type="boolean" default="true">
+      Whether to prompt the user if they have unsaved changes when navigating away or closing a web page.
+      Only works in browser environments.
+    </ParamField>
+    
+    <ParamField path="webSocketConstructor" type="typeof WebSocket">
+      Alternate WebSocket constructor to use for client communication.
+      Defaults to the global `WebSocket`.
+    </ParamField>
+    
+    <ParamField path="verbose" type="boolean" default="false">
+      Adds additional logging for debugging purposes.
+    </ParamField>
+    
+    <ParamField path="logger" type="Logger | boolean">
+      A logger, `true`, or `false`. If not provided or `true`, logs to the console.
+      If `false`, logs are not printed anywhere.
+    </ParamField>
+    
+    <ParamField path="skipConvexDeploymentUrlCheck" type="boolean" default="false">
+      Skip validating that the Convex deployment URL looks like a standard Convex URL.
+      Useful for self-hosted backends.
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+## Methods
+
+### mutation
+
+Execute a mutation function on the server.
+
+```typescript
+const result = await convex.mutation(
+  api.messages.send,
+  { text: "Hello!", channel: "#general" }
+);
+```
+
+<ParamField path="mutation" type="FunctionReference<'mutation'>" required>
+  A function reference for the public mutation to run, like `api.dir1.dir2.filename.func`.
+</ParamField>
+
+<ParamField path="args" type="object">
+  An arguments object for the mutation. If omitted, the arguments will be `{}`.
+</ParamField>
+
+<ParamField path="options" type="MutationOptions">
+  <Expandable title="options properties">
+    <ParamField path="optimisticUpdate" type="OptimisticUpdate">
+      An optimistic update to apply along with this mutation.
+      Locally updates queries while the mutation is pending.
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+**Returns:** A promise of the mutation's result.
+
+### action
+
+Execute an action function on the server.
+
+```typescript
+const summary = await convex.action(
+  api.ai.generateSummary,
+  { text: "Some long text..." }
+);
+```
+
+<ParamField path="action" type="FunctionReference<'action'>" required>
+  A function reference for the public action to run, like `api.dir1.dir2.filename.func`.
+</ParamField>
+
+<ParamField path="args" type="object">
+  An arguments object for the action. If omitted, the arguments will be `{}`.
+</ParamField>
+
+**Returns:** A promise of the action's result.
+
+### query
+
+Fetch a query result once (not reactive).
+
+```typescript
+const messages = await convex.query(
+  api.messages.list,
+  { channel: "#general" }
+);
+```
+
+<Note>
+  Most application code should subscribe to queries using the `useQuery` hook instead.
+  This method fetches the query result once without establishing a subscription.
+</Note>
+
+<ParamField path="query" type="FunctionReference<'query'>" required>
+  A function reference for the public query to run.
+</ParamField>
+
+<ParamField path="args" type="object">
+  An arguments object for the query. If omitted, the arguments will be `{}`.
+</ParamField>
+
+**Returns:** A promise of the query's result.
+
+### watchQuery
+
+Construct a watch on a Convex query function.
+
+```typescript
+const watch = convex.watchQuery(api.messages.list, { channel: "#general" });
+const unsubscribe = watch.onUpdate(() => {
+  const result = watch.localQueryResult();
+  console.log("Query updated:", result);
+});
+```
+
+<Warning>
+  Most application code should not call this method directly. Instead use the `useQuery` hook.
+</Warning>
+
+<ParamField path="query" type="FunctionReference<'query'>" required>
+  A function reference for the public query to run.
+</ParamField>
+
+<ParamField path="args" type="object">
+  An arguments object for the query. If omitted, the arguments will be `{}`.
+</ParamField>
+
+<ParamField path="options" type="WatchQueryOptions">
+  <Expandable title="options properties">
+    <ParamField path="journal" type="QueryJournal">
+      An optional journal produced from a previous execution of this query function.
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+**Returns:** A `Watch` object with methods:
+- `onUpdate(callback)` - Subscribe to query changes, returns unsubscribe function
+- `localQueryResult()` - Get the current result (or `undefined` if not available)
+- `journal()` - Get the current query journal
+
+### setAuth
+
+Set the authentication token for subsequent queries and mutations.
+
+```typescript
+convex.setAuth(
+  async () => {
+    const token = await fetchTokenFromAuthProvider();
+    return token;
+  },
+  (isAuthenticated) => {
+    console.log("Auth status changed:", isAuthenticated);
+  }
+);
+```
+
+<ParamField path="fetchToken" type="AuthTokenFetcher" required>
+  An async function returning the JWT-encoded OpenID Connect Identity Token.
+  Should return `null` if the token cannot be retrieved.
+</ParamField>
+
+<ParamField path="onChange" type="(isAuthenticated: boolean) => void">
+  A callback that will be called when the authentication status changes.
+</ParamField>
+
+### clearAuth
+
+Clear the current authentication token if set.
+
+```typescript
+convex.clearAuth();
+```
+
+### connectionState
+
+Get the current connection state between the client and the Convex backend.
+
+```typescript
+const state = convex.connectionState();
+console.log("Connected:", state.isWebSocketConnected);
+```
+
+**Returns:** A `ConnectionState` object with properties:
+- `hasInflightRequests` - Whether there are pending requests
+- `isWebSocketConnected` - Whether the WebSocket is connected
+- `timeOfOldestInflightRequest` - Date of oldest pending request or null
+- `hasEverConnected` - Whether the client has ever connected
+- `connectionCount` - Number of times the client has connected
+- `connectionRetries` - Number of failed connection attempts
+- `inflightMutations` - Number of mutations in flight
+- `inflightActions` - Number of actions in flight
+
+### subscribeToConnectionState
+
+Subscribe to connection state changes.
+
+```typescript
+const unsubscribe = convex.subscribeToConnectionState((state) => {
+  console.log("Connection state:", state);
+});
+
+// Later, unsubscribe
+unsubscribe();
+```
+
+<ParamField path="callback" type="(connectionState: ConnectionState) => void" required>
+  Function called whenever the connection state changes.
+</ParamField>
+
+**Returns:** An unsubscribe function to stop listening.
+
+### close
+
+Close any network handles associated with this client and stop all subscriptions.
+
+```typescript
+await convex.close();
+```
+
+**Returns:** A promise fulfilled when the connection has been completely closed.
+
+## Properties
+
+### url
+
+Return the address for this client.
+
+```typescript
+const deploymentUrl = convex.url;
+```
+
+**Returns:** The Convex deployment URL as a string.
+
+<Note>
+  Not guaranteed to match the address used in the constructor as it may be canonicalized.
+</Note>
+
+## Example usage
+
+### Basic setup
+
+```typescript
+import { ConvexReactClient } from "convex/react";
+import { ConvexProvider } from "convex/react";
+
+const convex = new ConvexReactClient(process.env.NEXT_PUBLIC_CONVEX_URL);
+
+function App() {
+  return (
+    <ConvexProvider client={convex}>
+      <YourApp />
+    </ConvexProvider>
+  );
+}
+```
+
+### With authentication
+
+```typescript
+import { ConvexReactClient } from "convex/react";
+import { useAuth0 } from "@auth0/auth0-react";
+
+const convex = new ConvexReactClient(process.env.NEXT_PUBLIC_CONVEX_URL);
+
+function AuthWrapper() {
+  const { getAccessTokenSilently, isAuthenticated } = useAuth0();
+  
+  useEffect(() => {
+    if (isAuthenticated) {
+      convex.setAuth(async () => {
+        return await getAccessTokenSilently();
+      });
+    } else {
+      convex.clearAuth();
+    }
+  }, [isAuthenticated]);
+  
+  return <App />;
+}
+```

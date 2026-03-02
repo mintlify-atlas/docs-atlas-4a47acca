@@ -1,0 +1,245 @@
+---
+title: Running tests
+description: How to run tests for Rust and TypeScript packages
+---
+
+## Rust tests
+
+The Convex Backend uses cargo-nextest for running Rust tests in CI, but you can also use standard cargo test commands.
+
+### Running all tests
+
+Test a specific package:
+
+```bash
+cargo test -p <package>
+```
+
+### Running specific tests
+
+Test a specific test or test group:
+
+```bash
+cargo test -p <package> "test_name"
+```
+
+### Using cargo-nextest
+
+For faster test execution, install and use cargo-nextest:
+
+<Steps>
+  <Step title="Install cargo-nextest">
+    ```bash
+    cargo install cargo-nextest
+    ```
+  </Step>
+
+  <Step title="Build tests">
+    ```bash
+    cargo nextest run --no-run --profile ci
+    ```
+  </Step>
+
+  <Step title="Run tests">
+    ```bash
+    cargo nextest run --profile ci
+    ```
+  </Step>
+</Steps>
+
+### Test environment variables
+
+Some tests may require environment variables. For example, database tests use:
+
+```bash
+CI_PGUSER=postgres CI_PGPASSWORD=postgres cargo test
+```
+
+## TypeScript tests
+
+### Running tests for a specific package
+
+Navigate to the package directory and run tests:
+
+```bash
+cd npm-packages/<package>/
+npm run test
+```
+
+### Running a specific test file
+
+Pass the file path to the test command:
+
+```bash
+cd npm-packages/<package>/
+npm run test -- <file>
+```
+
+### Running ESM tests
+
+Some packages have separate ESM tests:
+
+```bash
+npm run test-esm
+```
+
+## CI testing workflow
+
+The project uses GitHub Actions for continuous integration testing.
+
+### Rust CI pipeline
+
+The build and test workflow for Rust:
+
+<Steps>
+  <Step title="Check dependencies">
+    Verify Cargo.lock is up-to-date:
+
+    ```bash
+    cargo update -w --locked
+    ```
+  </Step>
+
+  <Step title="Build JavaScript dependencies">
+    Build JS packages required by the Rust isolate:
+
+    ```bash
+    just rush install
+    just rush build -t component-tests -t convex -t system-udfs -t udf-runtime -t udf-tests
+    ```
+  </Step>
+
+  <Step title="Build Rust tests">
+    ```bash
+    cargo nextest run --no-run --profile ci
+    ```
+  </Step>
+
+  <Step title="Run Rust tests">
+    ```bash
+    cargo nextest run --profile ci
+    ```
+  </Step>
+</Steps>
+
+### TypeScript CI pipeline
+
+The test and lint workflow for TypeScript packages:
+
+<Steps>
+  <Step title="Format check">
+    Check formatting with dprint:
+
+    ```bash
+    npx dprint check
+    ```
+  </Step>
+
+  <Step title="Install dependencies">
+    ```bash
+    npm i
+    ```
+  </Step>
+
+  <Step title="Run tests">
+    ```bash
+    npm run test
+    ```
+  </Step>
+
+  <Step title="Run ESM tests">
+    ```bash
+    npm run test-esm
+    ```
+  </Step>
+
+  <Step title="Run linter">
+    ```bash
+    npm run lint
+    ```
+  </Step>
+</Steps>
+
+## Database tests
+
+Some tests require database services. In CI, these run with Docker containers:
+
+### PostgreSQL
+
+```bash
+docker run -d \
+  --name postgres \
+  -e POSTGRESQL_PASSWORD=postgres \
+  -e POSTGRESQL_MAX_CONNECTIONS=500 \
+  -p 5432:5432 \
+  public.ecr.aws/bitnami/postgresql:16
+```
+
+Then run tests with:
+
+```bash
+CI_PGUSER=postgres CI_PGPASSWORD=postgres cargo test
+```
+
+### MySQL
+
+```bash
+docker run -d \
+  --name mysql \
+  -e MYSQL_ALLOW_EMPTY_PASSWORD=1 \
+  -e MYSQL_ROOT_PASSWORD="" \
+  -p 3306:3306 \
+  public.ecr.aws/docker/library/mysql:8.4.1-oracle
+```
+
+## Test development workflow
+
+When developing tests, follow this iterative workflow:
+
+<Steps>
+  <Step title="Write the test">
+    Create or modify test functions in your package.
+  </Step>
+
+  <Step title="Run the test">
+    For Rust:
+    ```bash
+    cargo test -p <package> "test_name"
+    ```
+
+    For TypeScript:
+    ```bash
+    cd npm-packages/<package>/
+    npm run test -- <file>
+    ```
+  </Step>
+
+  <Step title="Iterate and fix">
+    Make changes based on test results and re-run until tests pass.
+  </Step>
+
+  <Step title="Run full test suite">
+    Before submitting, run the full test suite for your package to ensure no regressions.
+  </Step>
+</Steps>
+
+## Environment setup
+
+Ensure you have the correct environment before running tests:
+
+<CodeGroup>
+```bash Node version
+# Check Node.js version matches .nvmrc
+node --version
+# Should output: v20.19.5
+```
+
+```bash Rust version
+# Rust version is managed by rust-toolchain file
+rustc --version
+```
+</CodeGroup>
+
+<Note>
+The Rust nightly version specified in `rust-toolchain` will be automatically used when you run cargo commands if you installed Rust via rustup.
+</Note>

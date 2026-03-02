@@ -1,0 +1,263 @@
+---
+title: Admin API
+description: Administrative API for managing Convex deployments programmatically
+---
+
+The Convex Admin API allows you to manage your deployments programmatically using admin keys. This API is used internally by the Convex CLI and can be used to build custom tooling.
+
+## Authentication
+
+All Admin API requests require authentication via an admin key passed in the `Authorization` header:
+
+```
+Authorization: Convex <admin-key>
+```
+
+### Admin key types
+
+<ParamField path="Deploy Key" type="string">
+  Used for CI/CD deployments. Can be scoped to production or preview deployments.
+  
+  Generate deploy keys in the Convex dashboard under Settings > Deploy Keys.
+</ParamField>
+
+<ParamField path="Admin Key" type="string">
+  Full administrative access to a deployment.
+  
+  - **Read-write keys** - Full access to all operations
+  - **Read-only keys** - Limited to read operations
+  
+  Generate in the dashboard under Settings > Admin Keys.
+</ParamField>
+
+## Admin key validation
+
+The backend validates admin keys through the application authentication system:
+
+```rust
+pub async fn must_be_admin_from_key(
+    app_auth: &ApplicationAuth,
+    instance_name: String,
+    admin_key: String,
+) -> anyhow::Result<Identity>
+```
+
+### Write access validation
+
+For operations that modify data, use write access validation:
+
+```rust
+pub async fn must_be_admin_from_key_with_write_access(
+    app_auth: &ApplicationAuth,
+    instance_name: String,
+    admin_key: String,
+) -> anyhow::Result<Identity>
+```
+
+## Error codes
+
+### BadDeployKey
+
+Returned when the provided admin key is invalid or doesn't match the deployment:
+
+```json
+{
+  "code": "BadDeployKey",
+  "message": "The provided deploy key was invalid for deployment 'my-deployment'. Double check that the environment this key was generated for matches the desired deployment."
+}
+```
+
+### ReadOnlyAdminKey
+
+Returned when attempting a write operation with a read-only admin key:
+
+```json
+{
+  "code": "ReadOnlyAdminKey",
+  "message": "You do not have permission to perform this operation."
+}
+```
+
+## Making API requests
+
+The Admin API is accessed via HTTP endpoints on your deployment URL.
+
+### Base URL
+
+- **Cloud deployments**: `https://<deployment-name>.convex.cloud`
+- **Self-hosted**: Your configured `--convex-origin`
+
+### Example: List tables
+
+```bash
+curl -X POST "https://my-deployment.convex.cloud/api/run_function" \
+  -H "Authorization: Convex $ADMIN_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "path": "_system/cli/tables",
+    "args": {},
+    "format": "json"
+  }'
+```
+
+### Example: Query data
+
+```bash
+curl -X POST "https://my-deployment.convex.cloud/api/run_function" \
+  -H "Authorization: Convex $ADMIN_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "path": "_system/cli/tableData",
+    "args": {
+      "table": "users",
+      "order": "desc"
+    },
+    "format": "json"
+  }'
+```
+
+## System functions
+
+The Admin API exposes several built-in system functions:
+
+### _system/cli/tables
+
+List all tables in the deployment.
+
+**Arguments**: `{}`
+
+**Returns**: Array of table objects with `name` field.
+
+### _system/cli/tableData
+
+Query documents from a table.
+
+**Arguments**:
+- `table` (string) - Table name
+- `order` (string) - Sort order: `"asc"` or `"desc"`
+
+**Returns**: Array of documents.
+
+### _system/cli/environmentVariables
+
+List environment variables.
+
+**Arguments**: `{}`
+
+**Returns**: Object mapping variable names to values.
+
+## Using the Admin API from Node.js
+
+You can use the Convex client library to make authenticated admin requests:
+
+```typescript
+import { ConvexHttpClient } from "convex/browser";
+
+const client = new ConvexHttpClient("https://my-deployment.convex.cloud");
+client.setAdminAuth(process.env.CONVEX_ADMIN_KEY!);
+
+// Query system functions
+const tables = await client.query("_system/cli/tables", {});
+console.log("Tables:", tables);
+
+// Query data
+const users = await client.query("_system/cli/tableData", {
+  table: "users",
+  order: "desc"
+});
+console.log("Users:", users);
+```
+
+## Deployment management API
+
+The Convex platform provides additional APIs for deployment management:
+
+### Create preview deployment
+
+```typescript
+const response = await fetch(
+  "https://api.convex.dev/api/claim_preview_deployment",
+  {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${previewDeployKey}`
+    },
+    body: JSON.stringify({
+      projectSelection: {
+        kind: "teamAndProjectSlugs",
+        teamSlug: "my-team",
+        projectSlug: "my-project"
+      },
+      identifier: "feature-branch"
+    })
+  }
+);
+
+const { adminKey, instanceUrl } = await response.json();
+```
+
+## Push API
+
+The CLI uses a push API to deploy code:
+
+1. **Start push** - Initiate a deployment
+2. **Upload modules** - Send function code
+3. **Finish push** - Complete the deployment
+
+This is handled automatically by `convex deploy` and `convex dev`.
+
+## Rate limits
+
+Admin API requests are subject to rate limits:
+
+- **Cloud deployments**: Shared limits per deployment
+- **Self-hosted**: No built-in limits (configure at proxy level)
+
+Excessive requests may be throttled or rejected.
+
+## Security best practices
+
+1. **Rotate keys regularly** - Generate new admin keys periodically
+2. **Use deploy keys in CI/CD** - Don't use full admin keys in automated systems
+3. **Scope keys appropriately** - Use read-only keys when write access isn't needed
+4. **Store keys securely** - Use secrets managers, never commit to source control
+5. **Monitor usage** - Track admin key usage in your deployment logs
+6. **Revoke compromised keys** - Immediately revoke and regenerate if a key is exposed
+
+## Identity types
+
+The Admin API authenticates requests as different identity types:
+
+- `InstanceAdmin` - Full admin access from admin key
+- `ActingUser` - Admin acting on behalf of a user
+- `System` - Internal system operations
+- `User` - End-user authenticated request (not admin)
+
+## Error handling
+
+Admin API errors include:
+
+- **400 Bad Request** - Invalid parameters
+- **401 Unauthorized** - Missing or invalid admin key
+- **403 Forbidden** - Admin key lacks required permissions
+- **404 Not Found** - Resource doesn't exist
+- **500 Internal Server Error** - Server error
+
+All errors return JSON with `code` and `message` fields:
+
+```json
+{
+  "code": "ErrorCode",
+  "message": "Human-readable error message"
+}
+```
+
+## OpenAPI specification
+
+The Convex CLI is generated from OpenAPI specifications:
+
+- Management API: `cli-management-openapi.json`
+- Function Logs API: `function-logs-openapi.json`
+
+These specifications are used to generate TypeScript types for the CLI.

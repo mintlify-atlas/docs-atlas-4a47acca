@@ -1,0 +1,403 @@
+---
+title: Scheduler API
+description: API reference for scheduling Convex functions to run in the future
+---
+
+The scheduler API allows you to schedule Convex functions to run at a specific time or after a delay.
+
+## Scheduling functions
+
+The scheduler is available as `ctx.scheduler` in mutations and actions.
+
+### runAfter
+
+Schedule a function to execute after a delay.
+
+```typescript
+import { mutation } from "./_generated/server";
+import { internal } from "./_generated/api";
+import { v } from "convex/values";
+
+export const createOrder = mutation({
+  args: { items: v.array(v.string()) },
+  handler: async (ctx, args) => {
+    const orderId = await ctx.db.insert("orders", {
+      items: args.items,
+      status: "pending",
+    });
+    
+    // Send confirmation email immediately after this mutation commits
+    await ctx.scheduler.runAfter(0, internal.emails.sendConfirmation, {
+      orderId,
+    });
+    
+    // Archive order after 30 days
+    await ctx.scheduler.runAfter(
+      30 * 24 * 60 * 60 * 1000,
+      internal.orders.archive,
+      { orderId }
+    );
+    
+    return orderId;
+  },
+});
+```
+
+<ParamField path="delayMs" type="number" required>
+  Delay in milliseconds. Must be non-negative.
+  
+  - If `0`, the scheduled function will be due to execute immediately after the scheduling function completes.
+  - Maximum delay is 5 years in the future.
+</ParamField>
+
+<ParamField path="functionReference" type="FunctionReference" required>
+  A reference to the function to schedule. Must be a mutation or action that is public or internal.
+  
+  ```typescript
+  import { internal } from "./_generated/api";
+  
+  internal.tasks.process
+  internal.emails.send
+  ```
+</ParamField>
+
+<ParamField path="args" type="object">
+  Arguments to pass to the scheduled function.
+</ParamField>
+
+<ResponseField name="return" type="Id<'_scheduled_functions'>">
+  The ID of the scheduled function in the `_scheduled_functions` system table. Use this to cancel the scheduled function later if needed.
+</ResponseField>
+
+### runAt
+
+Schedule a function to execute at a specific time.
+
+```typescript
+import { mutation } from "./_generated/server";
+import { internal } from "./_generated/api";
+import { v } from "convex/values";
+
+export const scheduleReminder = mutation({
+  args: {
+    text: v.string(),
+    scheduledTime: v.number(),
+  },
+  handler: async (ctx, args) => {
+    const reminderId = await ctx.db.insert("reminders", {
+      text: args.text,
+      scheduledTime: args.scheduledTime,
+    });
+    
+    // Schedule the reminder
+    const scheduledId = await ctx.scheduler.runAt(
+      args.scheduledTime,
+      internal.reminders.send,
+      { reminderId }
+    );
+    
+    // Store the scheduled function ID so we can cancel it later
+    await ctx.db.patch(reminderId, { scheduledId });
+    
+    return reminderId;
+  },
+});
+```
+
+<ParamField path="timestamp" type="number | Date" required>
+  A timestamp (milliseconds since epoch) or Date object.
+  
+  - If in the past, the function will be due to execute immediately after the scheduling function completes.
+  - Cannot be more than 5 years in the past or future.
+</ParamField>
+
+<ParamField path="functionReference" type="FunctionReference" required>
+  A reference to the function to schedule.
+</ParamField>
+
+<ParamField path="args" type="object">
+  Arguments to pass to the scheduled function.
+</ParamField>
+
+<ResponseField name="return" type="Id<'_scheduled_functions'>">
+  The ID of the scheduled function.
+</ResponseField>
+
+### cancel
+
+Cancel a previously scheduled function.
+
+```typescript
+import { mutation } from "./_generated/server";
+import { v } from "convex/values";
+
+export const cancelReminder = mutation({
+  args: { reminderId: v.id("reminders") },
+  handler: async (ctx, args) => {
+    const reminder = await ctx.db.get(args.reminderId);
+    if (!reminder || !reminder.scheduledId) {
+      throw new Error("Reminder not found or not scheduled");
+    }
+    
+    // Cancel the scheduled function
+    await ctx.scheduler.cancel(reminder.scheduledId);
+    
+    // Delete the reminder
+    await ctx.db.delete(args.reminderId);
+  },
+});
+```
+
+<ParamField path="id" type="Id<'_scheduled_functions'>" required>
+  The ID of the scheduled function to cancel (returned by `runAfter` or `runAt`).
+</ParamField>
+
+**Cancellation behavior:**
+
+- **Scheduled mutations:** The mutation will either show up as "pending", "completed", or "failed", but never "inProgress". Canceling will atomically cancel it entirely or fail if it has already committed.
+  
+- **Scheduled actions:** If the action has not started, it will not run. If already in progress, it continues running but any new functions it tries to schedule will be canceled. If already completed, canceling throws an error.
+
+## Execution guarantees
+
+### Scheduled mutations
+
+<Card title="Exactly once execution" icon="check-circle">
+  Scheduled mutations are **guaranteed to execute exactly once**. They are automatically retried on transient errors.
+</Card>
+
+<Card title="Atomic execution" icon="atom">
+  All writes in the mutation either succeed together or fail together.
+</Card>
+
+### Scheduled actions
+
+<Card title="At most once execution" icon="exclamation-triangle">
+  Scheduled actions execute **at most once**. They are not automatically retried and may fail due to transient errors.
+</Card>
+
+<Card title="Non-deterministic" icon="dice">
+  Actions can call external APIs and perform non-deterministic operations.
+</Card>
+
+## Scheduled function state
+
+Scheduled functions are stored in the `_scheduled_functions` system table:
+
+```typescript
+const scheduled = await ctx.db.system.get(scheduledId);
+if (scheduled) {
+  console.log(scheduled.name);          // Function name
+  console.log(scheduled.args);          // Arguments array
+  console.log(scheduled.scheduledTime); // When to run (ms since epoch)
+  console.log(scheduled.state);         // Current state
+}
+```
+
+**State values:**
+- `{ kind: "pending" }` - Not yet executed
+- `{ kind: "inProgress" }` - Currently executing (actions only)
+- `{ kind: "success" }` - Completed successfully
+- `{ kind: "failed", error: string }` - Failed with error
+- `{ kind: "canceled" }` - Canceled before execution
+
+## Common patterns
+
+### Email confirmation flow
+
+```typescript
+import { mutation } from "./_generated/server";
+import { internal } from "./_generated/api";
+import { v } from "convex/values";
+
+export const createAccount = mutation({
+  args: { email: v.string(), name: v.string() },
+  handler: async (ctx, args) => {
+    const userId = await ctx.db.insert("users", {
+      email: args.email,
+      name: args.name,
+      verified: false,
+    });
+    
+    // Send welcome email immediately
+    await ctx.scheduler.runAfter(0, internal.emails.sendWelcome, {
+      userId,
+    });
+    
+    return userId;
+  },
+});
+```
+
+### Reminder system
+
+```typescript
+import { mutation, internalMutation } from "./_generated/server";
+import { v } from "convex/values";
+
+export const scheduleReminder = mutation({
+  args: {
+    text: v.string(),
+    remindAt: v.number(),
+  },
+  handler: async (ctx, args) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) throw new Error("Not authenticated");
+    
+    const reminderId = await ctx.db.insert("reminders", {
+      userId: identity.tokenIdentifier,
+      text: args.text,
+      remindAt: args.remindAt,
+      sent: false,
+    });
+    
+    const scheduledId = await ctx.scheduler.runAt(
+      args.remindAt,
+      internal.reminders.send,
+      { reminderId }
+    );
+    
+    await ctx.db.patch(reminderId, { scheduledId });
+    
+    return reminderId;
+  },
+});
+
+export const send = internalMutation({
+  args: { reminderId: v.id("reminders") },
+  handler: async (ctx, args) => {
+    const reminder = await ctx.db.get(args.reminderId);
+    if (!reminder || reminder.sent) return;
+    
+    // Mark as sent
+    await ctx.db.patch(args.reminderId, { sent: true });
+    
+    // Send notification (via action, email service, etc.)
+    await ctx.scheduler.runAfter(0, internal.notifications.send, {
+      userId: reminder.userId,
+      message: reminder.text,
+    });
+  },
+});
+```
+
+### Trial expiration
+
+```typescript
+import { mutation, internalMutation } from "./_generated/server";
+import { v } from "convex/values";
+
+export const startTrial = mutation({
+  args: { userId: v.id("users") },
+  handler: async (ctx, args) => {
+    const trialEnd = Date.now() + 14 * 24 * 60 * 60 * 1000; // 14 days
+    
+    await ctx.db.patch(args.userId, {
+      trialEndsAt: trialEnd,
+      plan: "trial",
+    });
+    
+    // Schedule trial expiration
+    await ctx.scheduler.runAt(
+      trialEnd,
+      internal.billing.expireTrial,
+      { userId: args.userId }
+    );
+    
+    // Send reminder 3 days before trial ends
+    await ctx.scheduler.runAt(
+      trialEnd - 3 * 24 * 60 * 60 * 1000,
+      internal.emails.sendTrialReminder,
+      { userId: args.userId }
+    );
+  },
+});
+
+export const expireTrial = internalMutation({
+  args: { userId: v.id("users") },
+  handler: async (ctx, args) => {
+    const user = await ctx.db.get(args.userId);
+    if (!user || user.plan !== "trial") return;
+    
+    await ctx.db.patch(args.userId, { plan: "free" });
+    
+    await ctx.scheduler.runAfter(0, internal.emails.sendTrialExpired, {
+      userId: args.userId,
+    });
+  },
+});
+```
+
+### Retry with backoff
+
+```typescript
+import { action, internalAction } from "./_generated/server";
+import { internal } from "./_generated/api";
+import { v } from "convex/values";
+
+export const processWithRetry = action({
+  args: {
+    taskId: v.id("tasks"),
+    attempt: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const attempt = args.attempt ?? 1;
+    const maxAttempts = 3;
+    
+    try {
+      // Attempt processing
+      await fetch("https://api.example.com/process", {
+        method: "POST",
+        body: JSON.stringify({ taskId: args.taskId }),
+      });
+      
+      // Mark as completed
+      await ctx.runMutation(internal.tasks.markCompleted, {
+        taskId: args.taskId,
+      });
+    } catch (error) {
+      if (attempt < maxAttempts) {
+        // Retry with exponential backoff
+        const delayMs = Math.pow(2, attempt) * 1000; // 2s, 4s, 8s
+        
+        await ctx.scheduler.runAfter(
+          delayMs,
+          internal.tasks.processWithRetry,
+          {
+            taskId: args.taskId,
+            attempt: attempt + 1,
+          }
+        );
+      } else {
+        // Mark as failed after max attempts
+        await ctx.runMutation(internal.tasks.markFailed, {
+          taskId: args.taskId,
+          error: String(error),
+        });
+      }
+    }
+  },
+});
+```
+
+## Best practices
+
+<Card title="Use internal functions" icon="lock">
+  Scheduled functions should usually be internal mutations or actions to prevent direct client calls.
+</Card>
+
+<Card title="Store scheduled IDs for cancellation" icon="bookmark">
+  If you need to cancel scheduled functions later, store the returned scheduled function ID in your database.
+</Card>
+
+<Card title="Handle idempotency" icon="rotate">
+  Design scheduled functions to be idempotent when possible, so they can be safely retried.
+</Card>
+
+<Card title="Prefer mutations for guarantees" icon="shield-check">
+  Use scheduled mutations when you need exactly-once execution guarantees. Use actions for operations that call external APIs or can tolerate occasional failures.
+</Card>
+
+<Card title="Use delay 0 for immediate execution" icon="bolt">
+  Schedule with delay 0 to run a function immediately after the current mutation commits, useful for separating concerns.
+</Card>

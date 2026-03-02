@@ -1,0 +1,247 @@
+---
+title: Backend runtime configuration
+description: Configure your Convex backend runtime environment
+---
+
+Convex backends can be configured through `convex.json` and runtime options. This document covers the available configuration options for controlling backend behavior.
+
+## Project configuration (convex.json)
+
+The `convex.json` file in your project root controls how your Convex backend is built and deployed.
+
+### Basic structure
+
+```json
+{
+  "functions": "convex/",
+  "node": {
+    "externalPackages": [],
+    "nodeVersion": "18"
+  },
+  "generateCommonJSApi": false,
+  "codegen": {
+    "staticApi": true,
+    "staticDataModel": true
+  }
+}
+```
+
+### Configuration options
+
+<ParamField path="functions" type="string" default="convex/">
+  Directory containing your Convex functions.
+  
+  Relative to your project root. Must end with a trailing slash.
+</ParamField>
+
+<ParamField path="node.externalPackages" type="string[]" default={[]}>
+  List of npm packages to bundle as external dependencies.
+  
+  Packages listed here are loaded at runtime rather than bundled. This is required for packages that use Node.js native modules or dynamic imports.
+  
+  Example:
+  ```json
+  {
+    "node": {
+      "externalPackages": ["sharp", "@node-rs/argon2"]
+    }
+  }
+  ```
+</ParamField>
+
+<ParamField path="node.nodeVersion" type="string">
+  Node.js version to use in the runtime environment.
+  
+  Supported versions: `"18"`, `"20"`
+  
+  If not specified, uses the latest LTS version.
+</ParamField>
+
+<ParamField path="generateCommonJSApi" type="boolean" default={false}>
+  Whether to generate a CommonJS API in `convex/_generated/`.
+  
+  Set to `true` if you need to import generated code from CommonJS modules.
+</ParamField>
+
+<ParamField path="codegen.staticApi" type="boolean" default={true}>
+  Generate static type-safe API helpers in `convex/_generated/api.ts`.
+  
+  Provides auto-completion and type-checking for function references.
+</ParamField>
+
+<ParamField path="codegen.staticDataModel" type="boolean" default={true}>
+  Generate static type definitions for your data model in `convex/_generated/dataModel.d.ts`.
+  
+  Infers types from your schema definition.
+</ParamField>
+
+<ParamField path="codegen.fileType" type="string" default="ts">
+  File type for generated code.
+  
+  **Choices:** `"ts"`, `"js/dts"`
+  
+  - `"ts"` - Generate TypeScript files
+  - `"js/dts"` - Generate JavaScript with separate type definition files
+</ParamField>
+
+<ParamField path="bundler.includeSourcesContent" type="boolean" default={false}>
+  Include source code content in generated source maps.
+  
+  Useful for debugging in production, but increases bundle size.
+</ParamField>
+
+<ParamField path="typescriptCompiler" type="string">
+  TypeScript compiler to use for checking component implementations.
+  
+  **Choices:** `"tsc"`, `"swc"`
+</ParamField>
+
+### WorkOS AuthKit configuration
+
+<ParamField path="authKit" type="object">
+  Configuration for WorkOS AuthKit integration.
+  
+  Example:
+  ```json
+  {
+    "authKit": {
+      "dev": {
+        "configure": {
+          "redirectUris": ["http://localhost:3000/auth/callback"],
+          "appHomepageUrl": "http://localhost:3000"
+        }
+      },
+      "prod": {
+        "configure": {
+          "redirectUris": ["https://example.com/auth/callback"],
+          "appHomepageUrl": "https://example.com"
+        }
+      }
+    }
+  }
+  ```
+</ParamField>
+
+## Environment-specific configuration
+
+Configure different settings for development, preview, and production environments.
+
+### Development environment
+
+Configuration for local development and dev deployments:
+
+```json
+{
+  "authKit": {
+    "dev": {
+      "environmentType": "development",
+      "configure": {
+        "redirectUris": ["http://localhost:3000/callback"],
+        "corsOrigins": ["http://localhost:3000"]
+      }
+    }
+  }
+}
+```
+
+### Preview environment
+
+Configuration for preview deployments:
+
+```json
+{
+  "authKit": {
+    "preview": {
+      "environmentType": "staging",
+      "configure": {
+        "redirectUris": ["https://preview.example.com/callback"]
+      }
+    }
+  }
+}
+```
+
+### Production environment
+
+Configuration for production deployments:
+
+```json
+{
+  "authKit": {
+    "prod": {
+      "environmentType": "production",
+      "configure": {
+        "redirectUris": ["https://example.com/callback"],
+        "appHomepageUrl": "https://example.com"
+      }
+    }
+  }
+}
+```
+
+## Runtime environment variables
+
+Access environment variables in your Convex functions using `process.env`:
+
+```typescript
+// In a Convex function
+export const myQuery = query(async (ctx) => {
+  const apiKey = process.env.API_KEY;
+  // Use the API key...
+});
+```
+
+Set environment variables using the CLI:
+
+```bash
+npx convex env set API_KEY "your-api-key"
+```
+
+See the [env command documentation](/api/cli/env) for more details.
+
+## Node.js external packages
+
+Some npm packages require special handling:
+
+### Native modules
+
+Packages with native Node.js modules must be marked as external:
+
+```json
+{
+  "node": {
+    "externalPackages": ["sharp", "@node-rs/bcrypt"]
+  }
+}
+```
+
+### Dynamic imports
+
+Packages that use dynamic imports at runtime:
+
+```json
+{
+  "node": {
+    "externalPackages": ["openai", "@langchain/core"]
+  }
+}
+```
+
+## Best practices
+
+1. **Version control** - Commit `convex.json` to version control
+2. **Minimal externals** - Only mark packages as external when necessary
+3. **Type safety** - Keep `staticApi` and `staticDataModel` enabled
+4. **Node version** - Explicitly specify `nodeVersion` for consistency
+5. **Environment separation** - Use different configurations for dev, preview, and prod
+
+## Validation
+
+The CLI validates `convex.json` on each deployment. Common errors:
+
+- Invalid JSON syntax
+- Unknown configuration keys
+- Invalid values for known keys
+- Missing required fields
+
+Run `npx convex dev --once` to validate your configuration without deploying.

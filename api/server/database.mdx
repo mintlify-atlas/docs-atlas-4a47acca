@@ -1,0 +1,397 @@
+---
+title: Database operations
+description: API reference for reading and writing data in Convex
+---
+
+The database API provides methods to read and write documents in your Convex database.
+
+## Reading data
+
+### get
+
+Fetch a single document by its ID.
+
+```typescript
+const user = await ctx.db.get(userId);
+if (user === null) {
+  throw new Error("User not found");
+}
+```
+
+<ParamField path="id" type="Id<TableName>" required>
+  The ID of the document to fetch.
+</ParamField>
+
+<ResponseField name="return" type="Document | null">
+  The document if it exists, or `null` if it has been deleted or never existed.
+</ResponseField>
+
+You can also specify the table name explicitly:
+
+```typescript
+const user = await ctx.db.get("users", userId);
+```
+
+### query
+
+Begin a query for documents in a table.
+
+```typescript
+const messages = await ctx.db
+  .query("messages")
+  .withIndex("by_channel", (q) => q.eq("channelId", channelId))
+  .order("desc")
+  .take(50);
+```
+
+<ParamField path="tableName" type="string" required>
+  The name of the table to query.
+</ParamField>
+
+<ResponseField name="return" type="QueryInitializer">
+  A query builder object. See [Query methods](#query-methods) below.
+</ResponseField>
+
+### normalizeId
+
+Validate and normalize an ID string for a specific table.
+
+```typescript
+const userId = ctx.db.normalizeId("users", userIdString);
+if (userId === null) {
+  throw new Error("Invalid user ID");
+}
+```
+
+<ParamField path="tableName" type="string" required>
+  The name of the table.
+</ParamField>
+
+<ParamField path="id" type="string" required>
+  The ID string to validate.
+</ParamField>
+
+<ResponseField name="return" type="Id<TableName> | null">
+  The normalized ID if valid, or `null` if the ID is invalid for this table.
+</ResponseField>
+
+## Query methods
+
+### withIndex
+
+Query documents using an index for efficient lookups.
+
+```typescript
+const tasks = await ctx.db
+  .query("tasks")
+  .withIndex("by_user", (q) => q.eq("userId", userId))
+  .collect();
+```
+
+<ParamField path="indexName" type="string" required>
+  The name of the index to use.
+</ParamField>
+
+<ParamField path="indexRange" type="function" optional>
+  A function that builds an index range using equality and comparison operators:
+  - `q.eq(field, value)` - Match documents where field equals value
+  - `q.gt(field, value)` - Greater than
+  - `q.gte(field, value)` - Greater than or equal
+  - `q.lt(field, value)` - Less than  
+  - `q.lte(field, value)` - Less than or equal
+  
+  ```typescript
+  .withIndex("by_status_date", (q) =>
+    q.eq("status", "active").gt("createdAt", yesterday)
+  )
+  ```
+</ParamField>
+
+### withSearchIndex
+
+Perform full-text search using a search index.
+
+```typescript
+const results = await ctx.db
+  .query("documents")
+  .withSearchIndex("search_title", (q) =>
+    q.search("title", searchTerm)
+  )
+  .take(20);
+```
+
+<ParamField path="indexName" type="string" required>
+  The name of the search index.
+</ParamField>
+
+<ParamField path="searchFilter" type="function" required>
+  A function that defines the search query:
+  - `q.search(field, text)` - Full-text search on the search field
+  - `q.eq(field, value)` - Filter by exact match on filter fields
+  
+  ```typescript
+  .withSearchIndex("search_content", (q) =>
+    q.search("content", query).eq("published", true)
+  )
+  ```
+</ParamField>
+
+### order
+
+Define the order of query results.
+
+```typescript
+const recent = await ctx.db
+  .query("messages")
+  .order("desc")
+  .take(10);
+```
+
+<ParamField path="order" type="'asc' | 'desc'" required>
+  The sort order: `"asc"` for ascending or `"desc"` for descending.
+</ParamField>
+
+### filter
+
+Filter query results based on a condition.
+
+```typescript
+const completed = await ctx.db
+  .query("tasks")
+  .filter((q) => q.eq(q.field("completed"), true))
+  .collect();
+```
+
+**Important:** Use `.withIndex()` instead of `.filter()` whenever possible. Filters scan all documents matched so far, while indexes efficiently skip non-matching documents.
+
+<ParamField path="predicate" type="function" required>
+  A function that returns a filter expression using:
+  - `q.eq(a, b)` - Equal
+  - `q.neq(a, b)` - Not equal
+  - `q.lt(a, b)` - Less than
+  - `q.lte(a, b)` - Less than or equal
+  - `q.gt(a, b)` - Greater than
+  - `q.gte(a, b)` - Greater than or equal
+  - `q.and(...)` - Logical AND
+  - `q.or(...)` - Logical OR
+  - `q.not(expr)` - Logical NOT
+  - `q.field(name)` - Reference a field
+  
+  ```typescript
+  .filter((q) =>
+    q.and(
+      q.eq(q.field("status"), "active"),
+      q.gt(q.field("score"), 100)
+    )
+  )
+  ```
+</ParamField>
+
+## Consuming query results
+
+### collect
+
+Return all query results as an array.
+
+```typescript
+const allUsers = await ctx.db.query("users").collect();
+```
+
+**Warning:** This loads every matching document into memory. Only use `.collect()` when the result set is tightly bounded. For large or unbounded result sets, use `.take(n)`, `.first()`, `.unique()`, or pagination.
+
+### take
+
+Return the first `n` results.
+
+```typescript
+const recent = await ctx.db
+  .query("messages")
+  .order("desc")
+  .take(50);
+```
+
+<ParamField path="n" type="number" required>
+  The maximum number of results to return.
+</ParamField>
+
+### first
+
+Return the first result, or `null` if there are no results.
+
+```typescript
+const newest = await ctx.db
+  .query("tasks")
+  .order("desc")
+  .first();
+```
+
+### unique
+
+Return the only result, throwing an error if there are multiple matches.
+
+```typescript
+const user = await ctx.db
+  .query("users")
+  .withIndex("by_email", (q) => q.eq("email", email))
+  .unique();
+```
+
+Use this when you expect exactly zero or one result, such as when querying by a unique field. If the query matches more than one document, this will throw an error.
+
+### paginate
+
+Load a page of results with a cursor for loading more.
+
+```typescript
+const result = await ctx.db
+  .query("messages")
+  .order("desc")
+  .paginate(paginationOpts);
+
+// result.page contains the documents
+// result.continueCursor is used to fetch the next page
+```
+
+<ParamField path="paginationOpts" type="PaginationOptions" required>
+  <ParamField path="numItems" type="number" required>
+    The target number of items per page.
+  </ParamField>
+  
+  <ParamField path="cursor" type="string | null" optional>
+    The cursor from the previous page's result, or `null` for the first page.
+  </ParamField>
+</ParamField>
+
+<ResponseField name="page" type="Array<Document>">
+  The documents in this page.
+</ResponseField>
+
+<ResponseField name="continueCursor" type="string">
+  A cursor to fetch the next page.
+</ResponseField>
+
+<ResponseField name="isDone" type="boolean">
+  Whether this is the last page.
+</ResponseField>
+
+### Async iteration
+
+Process results one at a time without loading all into memory:
+
+```typescript
+for await (const task of ctx.db.query("tasks")) {
+  // Process each task
+  console.log(task.text);
+}
+```
+
+## Writing data
+
+Write operations are only available in mutations (`MutationCtx`).
+
+### insert
+
+Insert a new document into a table.
+
+```typescript
+const taskId = await ctx.db.insert("tasks", {
+  text: "Buy groceries",
+  completed: false,
+});
+```
+
+<ParamField path="table" type="string" required>
+  The name of the table.
+</ParamField>
+
+<ParamField path="value" type="object" required>
+  The document to insert. Do not include system fields (`_id`, `_creationTime`).
+</ParamField>
+
+<ResponseField name="return" type="Id<TableName>">
+  The ID of the newly inserted document.
+</ResponseField>
+
+### patch
+
+Shallow merge updates into an existing document.
+
+```typescript
+await ctx.db.patch(taskId, { completed: true });
+
+// Remove an optional field
+await ctx.db.patch(taskId, { assignee: undefined });
+```
+
+<ParamField path="id" type="Id<TableName>" required>
+  The ID of the document to update.
+</ParamField>
+
+<ParamField path="value" type="Partial<Document>" required>
+  The fields to update. Fields set to `undefined` are removed.
+</ParamField>
+
+**Tip:** Use `patch` for partial updates. Use `replace` to overwrite the entire document.
+
+### replace
+
+Completely replace a document with new values.
+
+```typescript
+await ctx.db.replace(userId, {
+  name: "Alice Smith",
+  email: "alice@example.com",
+});
+```
+
+<ParamField path="id" type="Id<TableName>" required>
+  The ID of the document to replace.
+</ParamField>
+
+<ParamField path="value" type="object" required>
+  The new document. System fields (`_id`, `_creationTime`) are preserved automatically.
+</ParamField>
+
+### delete
+
+Delete a document from the database.
+
+```typescript
+await ctx.db.delete(taskId);
+```
+
+<ParamField path="id" type="Id<TableName>" required>
+  The ID of the document to delete.
+</ParamField>
+
+## System tables
+
+Access system tables like `_storage` using `ctx.db.system`:
+
+```typescript
+// Get file metadata from _storage system table
+const metadata = await ctx.db.system.get(storageId);
+// metadata: { _id, _creationTime, sha256, size, contentType? }
+```
+
+System tables include:
+- `_storage` - File metadata
+- `_scheduled_functions` - Scheduled function state
+
+## Best practices
+
+<Card title="Use indexes for queries" icon="bolt">
+  Always use `.withIndex()` instead of `.filter()` for field-based queries. Indexes are dramatically faster.
+</Card>
+
+<Card title="Avoid unbounded queries" icon="triangle-exclamation">
+  Don't use `.collect()` on queries that can return unlimited results. Use `.take(n)`, pagination, or async iteration.
+</Card>
+
+<Card title="Prefer patch over replace" icon="pen-to-square">
+  Use `.patch()` for partial updates to avoid accidentally removing fields.
+</Card>
+
+<Card title="Check for null" icon="circle-question">
+  Always check if `.get()`, `.first()`, or `.unique()` returns `null` before using the result.
+</Card>

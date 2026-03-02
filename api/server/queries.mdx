@@ -1,0 +1,164 @@
+---
+title: Query functions
+description: API reference for defining and using Convex query functions
+---
+
+Queries allow you to read data from your Convex database. They are reactive and automatically update when data changes.
+
+## Defining queries
+
+### query
+
+Define a public query function that can be called from clients.
+
+```typescript
+import { query } from "./_generated/server";
+import { v } from "convex/values";
+
+export const listMessages = query({
+  args: { channelId: v.id("channels") },
+  returns: v.array(v.object({
+    _id: v.id("messages"),
+    text: v.string(),
+    author: v.string(),
+  })),
+  handler: async (ctx, args) => {
+    return await ctx.db
+      .query("messages")
+      .withIndex("by_channel", (q) => q.eq("channelId", args.channelId))
+      .order("desc")
+      .take(100);
+  },
+});
+```
+
+<ParamField path="args" type="PropertyValidators" optional>
+  Argument validation object using validators from `convex/values`. Maps argument names to their validators.
+  
+  ```typescript
+  args: {
+    userId: v.id("users"),
+    limit: v.optional(v.number()),
+  }
+  ```
+</ParamField>
+
+<ParamField path="returns" type="Validator" optional>
+  Return value validator. Helps catch bugs and provides better type safety.
+  
+  ```typescript
+  returns: v.array(v.string())
+  ```
+</ParamField>
+
+<ParamField path="handler" type="function" required>
+  The implementation function that receives a `QueryCtx` and validated arguments.
+  
+  <ParamField path="ctx" type="QueryCtx">
+    Query context with read-only database access.
+  </ParamField>
+  
+  <ParamField path="args" type="object">
+    Validated arguments matching the `args` validator.
+  </ParamField>
+</ParamField>
+
+### internalQuery
+
+Define an internal query that can only be called from other Convex functions, not directly from clients.
+
+```typescript
+import { internalQuery } from "./_generated/server";
+import { v } from "convex/values";
+
+export const getUserByEmail = internalQuery({
+  args: { email: v.string() },
+  returns: v.union(v.id("users"), v.null()),
+  handler: async (ctx, args) => {
+    const user = await ctx.db
+      .query("users")
+      .withIndex("by_email", (q) => q.eq("email", args.email))
+      .unique();
+    return user?._id ?? null;
+  },
+});
+```
+
+Internal queries are useful for:
+- Queries called from actions or scheduled functions
+- Shared query logic that shouldn't be exposed to clients
+- Administrative queries
+
+## Query context
+
+### QueryCtx
+
+The context object passed to query handlers.
+
+<ResponseField name="db" type="DatabaseReader">
+  Read-only database interface. See [Database API](/api/server/database) for details.
+  
+  ```typescript
+  const messages = await ctx.db.query("messages").collect();
+  const user = await ctx.db.get(userId);
+  ```
+</ResponseField>
+
+<ResponseField name="auth" type="Auth">
+  Authentication interface to get the current user's identity.
+  
+  ```typescript
+  const identity = await ctx.auth.getUserIdentity();
+  if (identity === null) {
+    throw new Error("Not authenticated");
+  }
+  ```
+</ResponseField>
+
+<ResponseField name="storage" type="StorageReader">
+  Read-only file storage interface. See [Storage API](/api/server/storage) for details.
+  
+  ```typescript
+  const url = await ctx.storage.getUrl(storageId);
+  ```
+</ResponseField>
+
+<ResponseField name="runQuery" type="function">
+  Call another query function within the same read snapshot.
+  
+  ```typescript
+  const user = await ctx.runQuery(internal.users.getById, { id: userId });
+  ```
+  
+  **Note:** Often you can extract shared logic into a helper function instead. `runQuery` incurs overhead of running argument and return value validation.
+</ResponseField>
+
+## Function shorthand
+
+You can also define queries using function shorthand syntax:
+
+```typescript
+export const myQuery = query(async (ctx, args) => {
+  // Query implementation
+});
+```
+
+This syntax is more concise but doesn't provide argument or return value validation.
+
+## Best practices
+
+<Card title="Use indexes for efficient queries" icon="bolt">
+  Always use `.withIndex()` instead of `.filter()` when querying by specific fields. Filters scan all documents, while indexes efficiently skip non-matching documents.
+</Card>
+
+<Card title="Add argument validation" icon="shield-check">
+  For security, always add argument validation to public queries in production apps.
+</Card>
+
+<Card title="Limit result sets" icon="list">
+  Use `.take(n)`, `.first()`, `.unique()`, or pagination instead of `.collect()` when result sets can grow unbounded.
+</Card>
+
+<Card title="Queries are reactive" icon="refresh">
+  When used with `useQuery` on the client, queries automatically re-run when their results change.
+</Card>

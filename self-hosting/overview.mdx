@@ -1,0 +1,109 @@
+---
+title: Self-hosting overview
+description: Learn how to self-host Convex on your own infrastructure or managed hosting provider
+---
+
+If you're interested in self-hosting [Convex](https://www.convex.dev) on your own infrastructure or a managed hosting provider, this guide will help you get started. Support is available on the [Convex Discord](https://discord.gg/convex) in the `#self-hosted` channel.
+
+<Warning>
+  If you don't specifically need to self-host, consider using [cloud-hosted Convex](https://docs.convex.dev/). Cloud-hosted Convex includes a generous free tier and provides a seamless, reliable, cost-effective platform that allows you to focus on building your application without worrying about infrastructure.
+</Warning>
+
+## Self-hosting architecture
+
+Self-hosting Convex requires deploying three services:
+
+1. **The Convex backend** - Handles all database operations and compute functions
+2. **The Convex dashboard** - Provides a web interface for managing your deployment
+3. **Your frontend app** - Can be hosted yourself or on a managed service like Netlify or Vercel
+
+## Default configuration
+
+By default, the Convex backend stores all state in a local SQLite database. We recommend starting with this basic configuration and then moving the container to a hosting provider or pointing the backend to a separate SQL database for a production-ready configuration as needed.
+
+## Deployment options
+
+### Quick start with Docker
+
+The easiest way to get started is using Docker Compose. This setup includes:
+
+- Convex backend running on port 3210
+- HTTP actions exposed on port 3211
+- Dashboard running on port 6791
+- Data stored in a Docker-managed volume
+
+See the [Docker deployment guide](/self-hosting/docker) for detailed instructions.
+
+### Advanced deployment options
+
+For production workloads, you have several options:
+
+- **Managed hosting providers**: Deploy to [Fly.io](https://fly.io), [Railway](https://railway.app), or similar platforms
+- **Your own infrastructure**: Run on your own servers with custom routing and domains
+- **Binary deployment**: Run the Convex binary directly without Docker
+
+### External database support
+
+For production deployments requiring guaranteed uptime, you can connect to managed database services:
+
+- **PostgreSQL**: Version 17 and compatible versions (e.g., [Neon](https://neon.tech))
+- **MySQL**: Version 8 and compatible versions (e.g., [PlanetScale](https://planetscale.com) with Vitess)
+
+<Warning>
+  It's very important your backend is hosted in the same region and as close as possible to your database. Any additional latency between backend and database will negatively impact query performance.
+</Warning>
+
+See [Database setup](/self-hosting/database-setup) for detailed instructions.
+
+### S3 storage support
+
+By default, the backend stores files on the local filesystem. For production deployments, you can configure S3-compatible storage for:
+
+- Snapshot exports and imports
+- Function modules
+- User files
+- Search indexes
+
+Supported providers include AWS S3, Cloudflare R2, and other S3-compatible services.
+
+See [Storage configuration](/self-hosting/storage) for detailed instructions.
+
+## Convex Auth
+
+If you're using Convex Auth, follow the [manual instructions](https://labs.convex.dev/auth/setup/manual) to set up. The CLI does not support self-hosted deployments yet.
+
+## Deploying your frontend app
+
+The Convex backend runs all database and compute functions but doesn't host your web app. When hosting your website on providers like Netlify or Vercel, use these environment variables:
+
+- `CONVEX_SELF_HOSTED_URL` - The URL where your Convex backend is hosted
+- `CONVEX_SELF_HOSTED_ADMIN_KEY` - The admin key generated for your deployment
+
+These replace the standard `CONVEX_DEPLOY_KEY` used in cloud-hosted deployments.
+
+## Limitations
+
+Self-hosted Convex supports all the free-tier features of the cloud-hosted product. The cloud-hosted product is optimized for scale beyond the self-hosted version.
+
+## Support and contributions
+
+- Join the [Convex Discord](https://discord.gg/convex) for help and discussions in the `#self-hosted` channel
+- Report issues through [GitHub Issues](https://github.com/get-convex/convex-backend/issues)
+- [Contributions are welcome](https://github.com/get-convex/convex-backend/blob/main/crates/convex/CONTRIBUTING.md)
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Docker deployment" icon="docker" href="/self-hosting/docker">
+    Get started quickly with Docker Compose
+  </Card>
+  <Card title="Configuration" icon="sliders" href="/self-hosting/configuration">
+    Configure runtime options and environment variables
+  </Card>
+  <Card title="Database setup" icon="database" href="/self-hosting/database-setup">
+    Connect to PostgreSQL or MySQL
+  </Card>
+  <Card title="Storage" icon="cloud" href="/self-hosting/storage">
+    Set up S3-compatible storage
+  </Card>
+</CardGroup>

@@ -1,0 +1,324 @@
+---
+title: Schema definition
+description: API reference for defining your Convex database schema
+---
+
+Define your database schema to enable runtime validation and end-to-end TypeScript type safety.
+
+## Schema definition
+
+### defineSchema
+
+Define the schema for your Convex project.
+
+```typescript
+import { defineSchema, defineTable } from "convex/server";
+import { v } from "convex/values";
+
+export default defineSchema({
+  users: defineTable({
+    name: v.string(),
+    email: v.string(),
+    age: v.optional(v.number()),
+  }).index("by_email", ["email"]),
+  
+  messages: defineTable({
+    text: v.string(),
+    userId: v.id("users"),
+    channelId: v.id("channels"),
+  })
+    .index("by_channel", ["channelId"])
+    .index("by_user", ["userId"])
+    .searchIndex("search_text", {
+      searchField: "text",
+    }),
+});
+```
+
+<ParamField path="schema" type="Record<string, TableDefinition>" required>
+  A map from table name to table definition.
+</ParamField>
+
+<ParamField path="options" type="DefineSchemaOptions" optional>
+  <ParamField path="schemaValidation" type="boolean" default="true">
+    Whether Convex should validate at runtime that documents match your schema.
+    
+    When `true`, Convex will:
+    1. Check that all existing documents match your schema when pushed
+    2. Check that all insertions and updates match your schema
+    
+    Set to `false` to skip runtime validation while keeping TypeScript types.
+  </ParamField>
+  
+  <ParamField path="strictTableNameTypes" type="boolean" default="true">
+    Whether TypeScript should allow accessing tables not in the schema.
+    
+    When `true`, using tables not listed in the schema generates a TypeScript error.
+    When `false`, unlisted tables have document type `any`.
+    
+    Set to `false` for rapid prototyping.
+  </ParamField>
+</ParamField>
+
+### defineTable
+
+Define a table in your schema.
+
+```typescript
+import { defineTable } from "convex/server";
+import { v } from "convex/values";
+
+const users = defineTable({
+  name: v.string(),
+  email: v.string(),
+  verified: v.boolean(),
+  joinedAt: v.number(),
+});
+```
+
+<ParamField path="documentSchema" type="PropertyValidators | Validator" required>
+  Either an object mapping field names to validators, or a validator (for union types).
+  
+  ```typescript
+  // Object style (most common)
+  defineTable({
+    field1: v.string(),
+    field2: v.number(),
+  })
+  
+  // Validator style (for unions)
+  defineTable(
+    v.union(
+      v.object({ kind: v.literal("text"), content: v.string() }),
+      v.object({ kind: v.literal("image"), url: v.string() }),
+    )
+  )
+  ```
+</ParamField>
+
+## System fields
+
+Every document automatically has system fields that you don't need to define:
+
+<ResponseField name="_id" type="Id<TableName>">
+  A unique document ID. Generated automatically on insert.
+</ResponseField>
+
+<ResponseField name="_creationTime" type="number">
+  The timestamp (milliseconds since epoch) when the document was created.
+</ResponseField>
+
+## Indexes
+
+### index
+
+Define an index on a table for efficient queries.
+
+```typescript
+defineTable({
+  userId: v.id("users"),
+  status: v.string(),
+  createdAt: v.number(),
+})
+  .index("by_user", ["userId"])
+  .index("by_status_createdAt", ["status", "createdAt"])
+```
+
+<ParamField path="name" type="string" required>
+  The name of the index. Best practice: use `"by_field1_field2"` naming.
+</ParamField>
+
+<ParamField path="fields" type="string[]" required>
+  The fields to index, in order. Must specify at least one field.
+  
+  Index fields must be queried in the same order they're defined. If you need to query by `field2` then `field1`, create a separate index.
+</ParamField>
+
+<ParamField path="options" type="IndexOptions" optional>
+  <ParamField path="staged" type="boolean" default="false">
+    Whether to stage this index. Staged indexes don't block push completion and can't be used in queries until enabled.
+  </ParamField>
+</ParamField>
+
+**Shorthand syntax:**
+
+```typescript
+// With options object
+.index("by_user", { fields: ["userId"] })
+
+// Array shorthand
+.index("by_user", ["userId"])
+```
+
+### searchIndex
+
+Define a full-text search index.
+
+```typescript
+defineTable({
+  title: v.string(),
+  content: v.string(),
+  published: v.boolean(),
+  category: v.string(),
+})
+  .searchIndex("search_content", {
+    searchField: "content",
+    filterFields: ["published", "category"],
+  })
+```
+
+<ParamField path="name" type="string" required>
+  The name of the search index.
+</ParamField>
+
+<ParamField path="config" type="SearchIndexConfig" required>
+  <ParamField path="searchField" type="string" required>
+    The field to index for full-text search. Must be a `v.string()` field.
+  </ParamField>
+  
+  <ParamField path="filterFields" type="string[]" optional>
+    Additional fields to index for fast filtering in search queries.
+  </ParamField>
+  
+  <ParamField path="staged" type="boolean" default="false">
+    Whether to stage this index.
+  </ParamField>
+</ParamField>
+
+### vectorIndex
+
+Define a vector index for similarity search.
+
+```typescript
+defineTable({
+  text: v.string(),
+  embedding: v.array(v.float64()),
+  category: v.string(),
+})
+  .vectorIndex("by_embedding", {
+    vectorField: "embedding",
+    dimensions: 1536,
+    filterFields: ["category"],
+  })
+```
+
+<ParamField path="name" type="string" required>
+  The name of the vector index.
+</ParamField>
+
+<ParamField path="config" type="VectorIndexConfig" required>
+  <ParamField path="vectorField" type="string" required>
+    The field containing vectors. Must be a `v.array(v.float64())` field.
+  </ParamField>
+  
+  <ParamField path="dimensions" type="number" required>
+    The length of the vectors. Must be between 2 and 2048 inclusive.
+  </ParamField>
+  
+  <ParamField path="filterFields" type="string[]" optional>
+    Additional fields to index for fast filtering in vector searches.
+  </ParamField>
+  
+  <ParamField path="staged" type="boolean" default="false">
+    Whether to stage this index.
+  </ParamField>
+</ParamField>
+
+## Field validators
+
+Use validators from `convex/values` to define field types:
+
+```typescript
+import { v } from "convex/values";
+
+defineTable({
+  // Primitives
+  name: v.string(),
+  age: v.number(),
+  verified: v.boolean(),
+  data: v.bytes(),
+  
+  // Optional fields
+  nickname: v.optional(v.string()),
+  
+  // References to other tables
+  authorId: v.id("users"),
+  
+  // Arrays
+  tags: v.array(v.string()),
+  
+  // Objects
+  address: v.object({
+    street: v.string(),
+    city: v.string(),
+    zip: v.string(),
+  }),
+  
+  // Unions
+  status: v.union(
+    v.literal("active"),
+    v.literal("inactive"),
+    v.literal("pending"),
+  ),
+  
+  // Any type (use sparingly)
+  metadata: v.any(),
+})
+```
+
+## Union types
+
+Define discriminated union types using validators:
+
+```typescript
+defineTable(
+  v.union(
+    v.object({
+      kind: v.literal("text"),
+      content: v.string(),
+    }),
+    v.object({
+      kind: v.literal("image"),
+      url: v.string(),
+      alt: v.string(),
+    }),
+    v.object({
+      kind: v.literal("video"),
+      url: v.string(),
+      duration: v.number(),
+    }),
+  )
+)
+```
+
+## Schema evolution
+
+When you modify your schema:
+
+1. **Adding fields:** Add them as optional (`v.optional()`) or provide a default in your code
+2. **Removing fields:** Remove from schema, then clean up old data with a migration
+3. **Changing types:** Create a new field, migrate data, then remove the old field
+4. **Adding indexes:** Add to schema and push. Convex will backfill automatically
+5. **Removing indexes:** Remove from schema and push
+
+## Best practices
+
+<Card title="Name indexes descriptively" icon="tag">
+  Use `"by_field1_field2"` naming to make it clear what fields are indexed and in what order.
+</Card>
+
+<Card title="Use optional fields for flexibility" icon="circle-half-stroke">
+  Make fields optional with `v.optional()` if they might not always be present. This makes schema evolution easier.
+</Card>
+
+<Card title="Index frequently queried fields" icon="bolt">
+  Create indexes for fields you filter or sort by frequently. Queries with indexes are dramatically faster.
+</Card>
+
+<Card title="Use validators for type safety" icon="shield-check">
+  Validators catch bugs early by validating data at runtime and providing TypeScript types.
+</Card>
+
+<Card title="Stage large indexes" icon="hourglass">
+  For large tables, use `staged: true` on new indexes to avoid blocking deployments during backfill.
+</Card>

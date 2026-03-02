@@ -1,0 +1,204 @@
+---
+title: Local development workflow
+description: Development workflows for Rust crates and TypeScript packages
+---
+
+## Rust crates
+
+When working on Rust crates in the `crates/` directory, follow this workflow:
+
+### After each change
+
+Format your code using cargo fmt:
+
+```bash
+cargo fmt
+```
+
+### When a change is ready
+
+<Steps>
+  <Step title="Lint the code">
+    Run the Rust linter:
+
+    ```bash
+    cargo clippy
+    ```
+  </Step>
+
+  <Step title="Build the package">
+    Build a specific package:
+
+    ```bash
+    cargo build -p <package>
+    ```
+  </Step>
+
+  <Step title="Run tests">
+    Test a specific package:
+
+    ```bash
+    cargo test -p <package>
+    ```
+
+    To run a specific test or test group:
+
+    ```bash
+    cargo test -p <package> "test_name"
+    ```
+  </Step>
+</Steps>
+
+### Formatting configuration
+
+The project uses `rustfmt` with custom configuration in `rustfmt.toml`. Key settings include:
+
+- Field init shorthand
+- Try shorthand
+- Nightly features enabled
+- Vertical imports layout
+- Comment wrapping
+
+## TypeScript monorepo
+
+When working on TypeScript packages in the `npm-packages/` directory, follow this workflow:
+
+### After each modification
+
+Format your code using dprint:
+
+```bash
+npx dprint fmt
+```
+
+The project uses [dprint](https://dprint.dev/) with prettier plugin for consistent formatting.
+
+### When the change is ready
+
+<Steps>
+  <Step title="Lint the code">
+    Run the JavaScript linter:
+
+    ```bash
+    npm run lint
+    ```
+  </Step>
+
+  <Step title="Build the package">
+    Build a specific package and its dependencies:
+
+    ```bash
+    just rush build -t <package>
+    ```
+  </Step>
+
+  <Step title="Run tests">
+    To run a specific test file, navigate to the package directory:
+
+    ```bash
+    cd npm-packages/<package>/
+    npm run test -- <file>
+    ```
+  </Step>
+</Steps>
+
+### Dependencies management
+
+This project uses Rush to manage dependencies.
+
+After modifying the dependencies of a package, run:
+
+```bash
+just rush update
+```
+
+Common Rush commands:
+
+- `just rush build` - Build all projects in npm-packages
+- `just rush rebuild` - Build when Rush doesn't realize something's changed
+- `just rush install` - Install dependencies when the repo has changed JS deps
+- `just rush update` - Update dependencies when you're changing JS deps
+
+## Code organization
+
+The Convex Backend project is organized into several key areas:
+
+### Client libraries
+
+The JavaScript/React libraries for Convex:
+
+```
+npm-packages/convex/src/
+```
+
+### CLI
+
+The command-line tool for Convex users (`npx convex`):
+
+```
+npm-packages/convex/src/cli/
+```
+
+### Dashboard
+
+The web user interface for Convex users:
+
+- `npm-packages/dashboard/` - Convex Cloud dashboard (https://dashboard.convex.dev/)
+- `npm-packages/dashboard-self-hosted/` - Self-hosted build of the dashboard
+- `npm-packages/dashboard-common/` - Code common to both dashboard versions
+- `npm-packages/@convex-dev/design-system/` - UI elements
+- `npm-packages/system-udfs/` - Convex functions the dashboard/CLI can call on deployments
+
+### Documentation
+
+Public docs at https://docs.convex.dev/:
+
+```
+npm-packages/docs/
+```
+
+## Local backend management
+
+### Running the local backend
+
+Start the open source Convex backend on port 3210:
+
+```bash
+just run-local-backend
+```
+
+### Running the dashboard
+
+Run the self-hosted dashboard locally:
+
+```bash
+just run-dashboard
+```
+
+### Resetting local data
+
+Clear any data or stored files from the local backend:
+
+```bash
+just reset-local-backend
+```
+
+This command removes:
+- `convex_local_storage/` directory
+- `convex_local_backend.sqlite3` file
+
+## Using Just commands
+
+The project uses [Just](https://github.com/casey/just) as a command runner instead of Makefiles. Just avoids several footguns associated with Makefiles.
+
+To see all available commands:
+
+```bash
+just --list
+```
+
+Or simply:
+
+```bash
+just
+```

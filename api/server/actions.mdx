@@ -1,0 +1,306 @@
+---
+title: Action functions
+description: API reference for defining and using Convex action functions
+---
+
+Actions allow you to call external APIs, use Node.js libraries, and perform non-deterministic operations. Unlike queries and mutations, actions do not have direct database access.
+
+## Defining actions
+
+### action
+
+Define a public action function that can be called from clients.
+
+```typescript
+import { action } from "./_generated/server";
+import { internal } from "./_generated/api";
+import { v } from "convex/values";
+
+export const sendWelcomeEmail = action({
+  args: { userId: v.id("users") },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    // Read data via ctx.runQuery
+    const user = await ctx.runQuery(internal.users.get, { id: args.userId });
+    
+    // Call external API
+    const response = await fetch("https://api.sendgrid.com/v3/mail/send", {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${process.env.SENDGRID_API_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        personalizations: [{ to: [{ email: user.email }] }],
+        from: { email: "hello@example.com" },
+        subject: "Welcome!",
+        content: [{ type: "text/plain", value: `Welcome ${user.name}!` }],
+      }),
+    });
+    
+    if (!response.ok) {
+      throw new Error(`Failed to send email: ${response.statusText}`);
+    }
+    
+    return null;
+  },
+});
+```
+
+<ParamField path="args" type="PropertyValidators" optional>
+  Argument validation object using validators from `convex/values`.
+</ParamField>
+
+<ParamField path="returns" type="Validator" optional>
+  Return value validator.
+</ParamField>
+
+<ParamField path="handler" type="function" required>
+  The implementation function that receives an `ActionCtx` and validated arguments.
+  
+  <ParamField path="ctx" type="ActionCtx">
+    Action context without direct database access.
+  </ParamField>
+  
+  <ParamField path="args" type="object">
+    Validated arguments matching the `args` validator.
+  </ParamField>
+</ParamField>
+
+### internalAction
+
+Define an internal action that can only be called from other Convex functions.
+
+```typescript
+import { internalAction } from "./_generated/server";
+import { internal } from "./_generated/api";
+import { v } from "convex/values";
+
+export const processPayment = internalAction({
+  args: {
+    orderId: v.id("orders"),
+    amount: v.number(),
+  },
+  returns: v.object({
+    success: v.boolean(),
+    transactionId: v.optional(v.string()),
+  }),
+  handler: async (ctx, args) => {
+    const order = await ctx.runQuery(internal.orders.get, { id: args.orderId });
+    
+    // Call payment processor
+    const result = await fetch("https://api.stripe.com/v1/charges", {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${process.env.STRIPE_SECRET_KEY}`,
+      },
+      body: new URLSearchParams({
+        amount: String(args.amount),
+        currency: "usd",
+        source: order.paymentToken,
+      }),
+    });
+    
+    const data = await result.json();
+    
+    if (result.ok) {
+      await ctx.runMutation(internal.orders.markPaid, {
+        orderId: args.orderId,
+        transactionId: data.id,
+      });
+      return { success: true, transactionId: data.id };
+    }
+    
+    return { success: false };
+  },
+});
+```
+
+## Action context
+
+### ActionCtx
+
+The context object passed to action handlers.
+
+<ResponseField name="runQuery" type="function">
+  Run a Convex query. Each call is a separate read transaction.
+  
+  ```typescript
+  const user = await ctx.runQuery(internal.users.get, { userId });
+  ```
+  
+  **Tip:** Use `internalQuery` to prevent users from calling the query directly.
+</ResponseField>
+
+<ResponseField name="runMutation" type="function">
+  Run a Convex mutation. Each call is a separate write transaction.
+  
+  ```typescript
+  await ctx.runMutation(internal.orders.markPaid, { orderId });
+  ```
+  
+  **Tip:** Use `internalMutation` to prevent users from calling it directly.
+</ResponseField>
+
+<ResponseField name="runAction" type="function">
+  Run another Convex action.
+  
+  ```typescript
+  await ctx.runAction(internal.emails.send, { userId });
+  ```
+  
+  **Important:** Only use this when crossing runtimes (e.g., calling a `"use node"` action from the default runtime). For code in the same runtime, extract shared logic into a TypeScript helper function instead.
+</ResponseField>
+
+<ResponseField name="scheduler" type="Scheduler">
+  Schedule functions to run in the future.
+  
+  ```typescript
+  // Schedule a reminder for later
+  await ctx.scheduler.runAfter(
+    7 * 24 * 60 * 60 * 1000, // 7 days
+    internal.reminders.send,
+    { userId }
+  );
+  ```
+  
+  See [Scheduler API](/api/server/scheduler) for details.
+</ResponseField>
+
+<ResponseField name="auth" type="Auth">
+  Authentication interface to get the current user's identity.
+  
+  ```typescript
+  const identity = await ctx.auth.getUserIdentity();
+  ```
+</ResponseField>
+
+<ResponseField name="storage" type="StorageActionWriter">
+  File storage interface with additional methods available only in actions.
+  
+  ```typescript
+  // Download a file as a Blob
+  const blob = await ctx.storage.get(storageId);
+  
+  // Upload a Blob directly
+  const newStorageId = await ctx.storage.store(blob);
+  ```
+  
+  See [Storage API](/api/server/storage) for details.
+</ResponseField>
+
+<ResponseField name="vectorSearch" type="function">
+  Run a vector search on a table.
+  
+  ```typescript
+  const results = await ctx.vectorSearch("documents", "by_embedding", {
+    vector: embedding,
+    limit: 10,
+  });
+  ```
+</ResponseField>
+
+## Common use cases
+
+### Calling external APIs
+
+Actions can make HTTP requests to external services:
+
+```typescript
+export const fetchWeather = action({
+  args: { city: v.string() },
+  returns: v.object({
+    temperature: v.number(),
+    condition: v.string(),
+  }),
+  handler: async (ctx, args) => {
+    const response = await fetch(
+      `https://api.weather.com/v1/current?city=${args.city}&key=${process.env.WEATHER_API_KEY}`
+    );
+    return await response.json();
+  },
+});
+```
+
+### Using Node.js libraries
+
+Actions can use Node.js built-in modules and npm packages:
+
+```typescript
+import { action } from "./_generated/server";
+import { v } from "convex/values";
+import crypto from "crypto";
+
+export const generateToken = action({
+  args: {},
+  returns: v.string(),
+  handler: async (ctx, args) => {
+    return crypto.randomBytes(32).toString("hex");
+  },
+});
+```
+
+### Processing files
+
+Actions can download, process, and re-upload files:
+
+```typescript
+import { action } from "./_generated/server";
+import { internal } from "./_generated/api";
+import { v } from "convex/values";
+import sharp from "sharp";
+
+export const generateThumbnail = action({
+  args: { imageId: v.id("_storage") },
+  returns: v.id("_storage"),
+  handler: async (ctx, args) => {
+    // Download the image
+    const blob = await ctx.storage.get(args.imageId);
+    if (!blob) throw new Error("Image not found");
+    
+    // Process with sharp
+    const buffer = Buffer.from(await blob.arrayBuffer());
+    const thumbnail = await sharp(buffer)
+      .resize(200, 200)
+      .toBuffer();
+    
+    // Upload the thumbnail
+    const thumbnailBlob = new Blob([thumbnail], { type: "image/jpeg" });
+    const thumbnailId = await ctx.storage.store(thumbnailBlob);
+    
+    return thumbnailId;
+  },
+});
+```
+
+## Execution guarantees
+
+<Card title="At most once execution" icon="exclamation-triangle">
+  Unlike mutations, actions are **not** automatically retried on transient errors. They execute **at most once**.
+</Card>
+
+<Card title="No direct database access" icon="database">
+  Actions cannot use `ctx.db`. Use `ctx.runQuery` and `ctx.runMutation` instead.
+</Card>
+
+<Card title="Non-deterministic operations allowed" icon="dice">
+  Actions can call external APIs, use randomness, access the current time, and perform other non-deterministic operations.
+</Card>
+
+## Best practices
+
+<Card title="Use internal actions" icon="lock">
+  For actions that should only be called from other functions, use `internalAction`.
+</Card>
+
+<Card title="Handle errors gracefully" icon="shield-exclamation">
+  Actions can fail due to network issues or external API errors. Always handle errors appropriately.
+</Card>
+
+<Card title="Keep actions idempotent" icon="rotate">
+  When possible, design actions so they can be safely retried without side effects.
+</Card>
+
+<Card title="Don't use runAction unnecessarily" icon="triangle-exclamation">
+  Only use `runAction` when crossing runtimes. For shared logic in the same runtime, use helper functions.
+</Card>

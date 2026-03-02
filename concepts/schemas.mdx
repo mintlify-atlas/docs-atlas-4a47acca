@@ -1,0 +1,543 @@
+---
+title: Schemas
+description: Define and validate your database structure with Convex schemas for runtime validation and TypeScript type safety
+---
+
+Schemas in Convex define the structure of your database tables and provide runtime validation. When you define a schema, you get:
+
+- **Runtime validation** - Convex validates all data matches your schema
+- **TypeScript types** - Automatically generated types for your entire data model
+- **Index definitions** - Declare indexes for efficient queries
+- **Documentation** - Self-documenting data structure
+
+## Defining a schema
+
+Schemas are defined in a `schema.ts` file in your `convex/` directory using `defineSchema`, `defineTable`, and validators from `v`:
+
+```typescript
+// convex/schema.ts
+import { defineSchema, defineTable } from "convex/server";
+import { v } from "convex/values";
+
+export default defineSchema({
+  users: defineTable({
+    name: v.string(),
+    email: v.string(),
+    age: v.optional(v.number()),
+  }).index("by_email", ["email"]),
+  
+  messages: defineTable({
+    body: v.string(),
+    userId: v.id("users"),
+    channelId: v.id("channels"),
+  })
+    .index("by_channel", ["channelId"])
+    .index("by_user", ["userId"]),
+  
+  channels: defineTable({
+    name: v.string(),
+    isPrivate: v.boolean(),
+  }),
+});
+```
+
+<Note>
+The schema must be the **default export** from `convex/schema.ts`. Convex reads this file during deployment to validate your data and generate TypeScript types.
+</Note>
+
+## Field validators
+
+Convex provides validators for all JavaScript value types:
+
+### Primitive types
+
+```typescript
+import { v } from "convex/values";
+
+defineTable({
+  // Strings
+  name: v.string(),
+  
+  // Numbers (integers and floats)
+  age: v.number(),
+  price: v.float64(),
+  
+  // Booleans
+  isActive: v.boolean(),
+  
+  // Null
+  deletedAt: v.null(),
+  
+  // Bytes (for binary data)
+  avatar: v.bytes(),
+})
+```
+
+### IDs and references
+
+Use `v.id()` to reference documents in other tables:
+
+```typescript
+defineTable({
+  // Reference to a user document
+  userId: v.id("users"),
+  
+  // Reference to a channel document
+  channelId: v.id("channels"),
+})
+```
+
+IDs are strongly typed - TypeScript will prevent you from mixing up IDs from different tables.
+
+### Arrays
+
+```typescript
+defineTable({
+  // Array of strings
+  tags: v.array(v.string()),
+  
+  // Array of numbers
+  scores: v.array(v.number()),
+  
+  // Array of user IDs
+  memberIds: v.array(v.id("users")),
+  
+  // Nested arrays
+  matrix: v.array(v.array(v.number())),
+})
+```
+
+### Objects
+
+```typescript
+defineTable({
+  // Object with known fields
+  address: v.object({
+    street: v.string(),
+    city: v.string(),
+    zipCode: v.string(),
+  }),
+  
+  // Nested objects
+  profile: v.object({
+    bio: v.string(),
+    social: v.object({
+      twitter: v.optional(v.string()),
+      linkedin: v.optional(v.string()),
+    }),
+  }),
+})
+```
+
+### Optional fields
+
+Use `v.optional()` for fields that may not be present:
+
+```typescript
+defineTable({
+  name: v.string(),           // Required
+  nickname: v.optional(v.string()),  // Optional
+  age: v.optional(v.number()),       // Optional
+})
+```
+
+Optional fields can be omitted when inserting documents or set to `undefined` when patching.
+
+### Unions
+
+Model discriminated unions or multiple allowed types:
+
+```typescript
+defineTable({
+  // Simple union of types
+  status: v.union(
+    v.literal("pending"),
+    v.literal("approved"),
+    v.literal("rejected")
+  ),
+  
+  // Discriminated union (recommended pattern)
+  result: v.union(
+    v.object({
+      type: v.literal("success"),
+      value: v.number(),
+    }),
+    v.object({
+      type: v.literal("error"),
+      message: v.string(),
+    })
+  ),
+})
+```
+
+### Any type
+
+For fields with dynamic content (use sparingly):
+
+```typescript
+defineTable({
+  metadata: v.any(),  // Can be any valid Convex value
+})
+```
+
+<Warning>
+Avoid `v.any()` in production schemas when possible. It bypasses type safety and makes code harder to maintain. Prefer explicit unions or objects.
+</Warning>
+
+## System fields
+
+Every document automatically has two system fields that you don't need to define:
+
+- `_id` - Unique document ID with type `Id<"tableName">`
+- `_creationTime` - Timestamp (milliseconds since epoch) when the document was created
+
+These are added automatically and available in all documents:
+
+```typescript
+const message = await ctx.db.get(messageId);
+console.log(message._id);           // Id<"messages">
+console.log(message._creationTime); // number (timestamp)
+```
+
+## Defining indexes
+
+Indexes make queries efficient by allowing fast lookups on specific fields. Define indexes with the `.index()` method:
+
+```typescript
+export default defineSchema({
+  messages: defineTable({
+    body: v.string(),
+    channelId: v.id("channels"),
+    userId: v.id("users"),
+    timestamp: v.number(),
+  })
+    // Simple index on one field
+    .index("by_channel", ["channelId"])
+    
+    // Compound index on multiple fields
+    .index("by_channel_timestamp", ["channelId", "timestamp"])
+    
+    // Index on multiple fields (order matters)
+    .index("by_user_channel", ["userId", "channelId"]),
+});
+```
+
+### Index naming convention
+
+Name indexes after their fields, prefixed with `by_`:
+
+<CodeGroup>
+```typescript Good
+.index("by_email", ["email"])
+.index("by_status_createdAt", ["status", "createdAt"])
+.index("by_user_channel", ["userId", "channelId"])
+```
+
+```typescript Avoid
+.index("emailIndex", ["email"])  // Unclear
+.index("idx1", ["status", "createdAt"])  // Meaningless
+```
+</CodeGroup>
+
+### Using indexes in queries
+
+Indexes are used with `.withIndex()` in queries:
+
+```typescript
+import { query } from "./_generated/server";
+import { v } from "convex/values";
+
+export const listChannelMessages = query({
+  args: { channelId: v.id("channels") },
+  handler: async (ctx, args) => {
+    return await ctx.db
+      .query("messages")
+      .withIndex("by_channel", (q) => 
+        q.eq("channelId", args.channelId)
+      )
+      .order("desc")
+      .take(50);
+  },
+});
+```
+
+### Compound indexes
+
+When using compound indexes, you must query fields in order:
+
+```typescript
+// Schema
+defineTable({
+  status: v.string(),
+  priority: v.string(),
+  createdAt: v.number(),
+}).index("by_status_priority_createdAt", ["status", "priority", "createdAt"])
+
+// Valid queries
+q.eq("status", "open")  // Uses index
+q.eq("status", "open").eq("priority", "high")  // Uses index
+q.eq("status", "open").eq("priority", "high").gt("createdAt", timestamp)  // Uses index
+
+// Invalid query
+q.eq("priority", "high")  // Cannot skip "status" field
+```
+
+If you need to query by different field combinations, create separate indexes.
+
+## Search indexes
+
+Search indexes enable full-text search on string fields:
+
+```typescript
+export default defineSchema({
+  documents: defineTable({
+    title: v.string(),
+    content: v.string(),
+    authorId: v.id("users"),
+    category: v.string(),
+  })
+    .searchIndex("search_content", {
+      searchField: "content",
+      filterFields: ["authorId", "category"],
+    }),
+});
+```
+
+Search indexes allow you to:
+- Search text in the `searchField`
+- Filter results by `filterFields` for efficient queries
+
+```typescript
+import { query } from "./_generated/server";
+import { v } from "convex/values";
+
+export const searchDocuments = query({
+  args: {
+    searchText: v.string(),
+    category: v.string(),
+  },
+  handler: async (ctx, args) => {
+    return await ctx.db
+      .query("documents")
+      .withSearchIndex("search_content", (q) =>
+        q.search("content", args.searchText)
+         .eq("category", args.category)
+      )
+      .take(20);
+  },
+});
+```
+
+## Vector indexes
+
+Vector indexes enable similarity search for embeddings:
+
+```typescript
+export default defineSchema({
+  embeddings: defineTable({
+    text: v.string(),
+    embedding: v.array(v.float64()),
+    category: v.string(),
+  })
+    .vectorIndex("by_embedding", {
+      vectorField: "embedding",
+      dimensions: 1536,  // Must match your embedding model
+      filterFields: ["category"],
+    }),
+});
+```
+
+The `dimensions` must match the size of your embedding vectors (e.g., 1536 for OpenAI's text-embedding-ada-002).
+
+## Schema validation
+
+By default, Convex validates all data against your schema:
+
+1. **On deployment** - Checks all existing documents match the schema
+2. **On write** - Validates inserts and updates match the schema
+
+If validation fails, the operation throws an error:
+
+```typescript
+// This will throw an error if 'email' is not a string
+await ctx.db.insert("users", {
+  name: "Alice",
+  email: 123,  // Type error!
+});
+```
+
+### Disabling validation
+
+For rapid prototyping, you can disable schema validation:
+
+```typescript
+export default defineSchema(
+  {
+    users: defineTable({
+      name: v.string(),
+      email: v.string(),
+    }),
+  },
+  {
+    schemaValidation: false,  // Disable runtime validation
+  }
+);
+```
+
+<Warning>
+Only disable schema validation during prototyping. Always enable it for production apps to prevent data inconsistencies.
+</Warning>
+
+## Strict table names
+
+By default, TypeScript enforces that you only access tables defined in your schema. To disable this for prototyping:
+
+```typescript
+export default defineSchema(
+  {
+    users: defineTable({
+      name: v.string(),
+    }),
+  },
+  {
+    strictTableNameTypes: false,  // Allow accessing undefined tables
+  }
+);
+```
+
+## Generated types
+
+Convex automatically generates TypeScript types from your schema in `convex/_generated/dataModel.d.ts`:
+
+```typescript
+import { Doc, Id } from "./_generated/dataModel";
+
+// Use generated document types
+function processUser(user: Doc<"users">) {
+  console.log(user._id);        // Id<"users">
+  console.log(user.name);       // string
+  console.log(user.email);      // string
+  console.log(user._creationTime);  // number
+}
+
+// Use generated ID types
+function getUserId(): Id<"users"> {
+  // Type-safe ID
+}
+```
+
+## Schema evolution
+
+Schemas can evolve over time. Convex supports several patterns:
+
+### Adding optional fields
+
+Safe - existing documents remain valid:
+
+```typescript
+// Before
+defineTable({
+  name: v.string(),
+})
+
+// After - existing documents don't have 'bio'
+defineTable({
+  name: v.string(),
+  bio: v.optional(v.string()),  // New optional field
+})
+```
+
+### Adding required fields
+
+Requires migrating existing documents first:
+
+```typescript
+// Step 1: Add as optional
+defineTable({
+  name: v.string(),
+  email: v.optional(v.string()),
+})
+
+// Step 2: Run migration to populate field
+// (migration code in a mutation)
+
+// Step 3: Make required
+defineTable({
+  name: v.string(),
+  email: v.string(),  // Now required
+})
+```
+
+### Removing fields
+
+Make optional first, then remove:
+
+```typescript
+// Step 1: Make optional
+defineTable({
+  name: v.string(),
+  oldField: v.optional(v.string()),
+})
+
+// Step 2: Remove from schema
+defineTable({
+  name: v.string(),
+  // oldField removed
+})
+```
+
+## Complex schema example
+
+Here's a complete schema for a chat application:
+
+```typescript
+import { defineSchema, defineTable } from "convex/server";
+import { v } from "convex/values";
+
+export default defineSchema({
+  users: defineTable({
+    name: v.string(),
+    email: v.string(),
+    avatarUrl: v.optional(v.string()),
+    status: v.union(
+      v.literal("online"),
+      v.literal("offline"),
+      v.literal("away")
+    ),
+  })
+    .index("by_email", ["email"]),
+  
+  channels: defineTable({
+    name: v.string(),
+    isPrivate: v.boolean(),
+    memberIds: v.array(v.id("users")),
+    createdBy: v.id("users"),
+  })
+    .index("by_createdBy", ["createdBy"]),
+  
+  messages: defineTable({
+    body: v.string(),
+    userId: v.id("users"),
+    channelId: v.id("channels"),
+    edited: v.optional(v.boolean()),
+    reactions: v.optional(v.array(
+      v.object({
+        emoji: v.string(),
+        userIds: v.array(v.id("users")),
+      })
+    )),
+  })
+    .index("by_channel", ["channelId"])
+    .index("by_user", ["userId"])
+    .searchIndex("search_body", {
+      searchField: "body",
+      filterFields: ["channelId"],
+    }),
+});
+```
+
+## Next steps
+
+- Learn about [Functions](/concepts/functions) to use your schema in queries and mutations
+- Understand the [Reactive database](/concepts/reactive-database) model
+- Explore [Real-time sync](/concepts/real-time-sync) for client integration

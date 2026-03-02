@@ -1,0 +1,310 @@
+---
+title: Full-text search
+description: Implement full-text search with search indexes and relevance ranking
+---
+
+Convex provides built-in full-text search capabilities through search indexes. Search queries automatically rank results by relevance and support filtering on additional fields.
+
+## Search indexes
+
+Define search indexes in your schema to enable full-text search:
+
+```typescript
+import { defineSchema, defineTable } from "convex/server";
+import { v } from "convex/values";
+
+export default defineSchema({
+  posts: defineTable({
+    title: v.string(),
+    body: v.string(),
+    category: v.string(),
+    authorId: v.string(),
+  })
+    .searchIndex("search_title", {
+      searchField: "title",
+      filterFields: ["category", "authorId"],
+    })
+    .searchIndex("search_body", {
+      searchField: "body",
+      filterFields: ["category"],
+    }),
+});
+```
+
+A search index requires:
+
+<ParamField path="searchField" type="string">
+  The field to perform full-text search on. Must be a string field.
+</ParamField>
+
+<ParamField path="filterFields" type="string[]" optional>
+  Additional fields to filter on using equality filters. These can be any Convex value type.
+</ParamField>
+
+## Querying with search
+
+Use `.withSearchIndex()` to perform full-text search queries:
+
+```typescript
+import { query } from "./_generated/server";
+import { v } from "convex/values";
+
+export const searchPosts = query({
+  args: { searchQuery: v.string() },
+  handler: async (ctx, args) => {
+    const results = await ctx.db
+      .query("posts")
+      .withSearchIndex("search_title", (q) => q.search("title", args.searchQuery))
+      .take(20);
+    return results;
+  },
+});
+```
+
+### Search filter builder
+
+The `SearchFilterBuilder` is provided to construct search queries:
+
+#### search
+
+Search for terms in the indexed field:
+
+```typescript
+.withSearchIndex("search_title", (q) => q.search("title", searchQuery))
+```
+
+<ParamField path="fieldName" type="string">
+  The name of the field to search in. Must match the index's `searchField`.
+</ParamField>
+
+<ParamField path="query" type="string">
+  The query text to search for.
+</ParamField>
+
+**How search works:**
+- Returns results where **any word** of the query appears in the field
+- Results are ranked by relevance considering:
+  - How many words in the query appear in the text?
+  - How many times do they appear?
+  - How long is the text field?
+
+#### eq (equality filter)
+
+Restrict search results to documents where a filter field equals a value:
+
+```typescript
+.withSearchIndex("search_title", (q) =>
+  q.search("title", searchQuery).eq("category", "tech")
+)
+```
+
+<ParamField path="fieldName" type="string">
+  The name of the field to compare. Must be listed in the search index's `filterFields`.
+</ParamField>
+
+<ParamField path="value" type="any">
+  The value to compare against. Type must match the field type.
+</ParamField>
+
+You can chain multiple `.eq()` calls:
+
+```typescript
+.withSearchIndex("search_title", (q) =>
+  q.search("title", searchQuery)
+    .eq("category", "tech")
+    .eq("authorId", userId)
+)
+```
+
+## Search results
+
+Search queries return documents in **relevance order** - the most relevant results appear first. The relevance algorithm considers:
+
+1. **Term frequency** - How often query words appear in the document
+2. **Document length** - Shorter documents with matches rank higher
+3. **Coverage** - Documents matching more query words rank higher
+
+### Taking results
+
+Use `.take()` to limit results:
+
+```typescript
+const results = await ctx.db
+  .query("posts")
+  .withSearchIndex("search_title", (q) => q.search("title", query))
+  .take(50); // Get top 50 most relevant results
+```
+
+### Pagination
+
+Search supports pagination for better performance:
+
+```typescript
+import { query } from "./_generated/server";
+import { v } from "convex/values";
+
+export const searchPaginated = query({
+  args: {
+    searchQuery: v.string(),
+    paginationOpts: v.object({
+      numItems: v.number(),
+      cursor: v.union(v.string(), v.null()),
+    }),
+  },
+  handler: async (ctx, args) => {
+    const results = await ctx.db
+      .query("posts")
+      .withSearchIndex("search_title", (q) => q.search("title", args.searchQuery))
+      .paginate(args.paginationOpts);
+    return results;
+  },
+});
+```
+
+## Common patterns
+
+### Search with category filter
+
+```typescript
+export const searchPostsByCategory = query({
+  args: {
+    query: v.string(),
+    category: v.string(),
+  },
+  handler: async (ctx, args) => {
+    return await ctx.db
+      .query("posts")
+      .withSearchIndex("search_title", (q) =>
+        q.search("title", args.query).eq("category", args.category)
+      )
+      .take(30);
+  },
+});
+```
+
+### Search with multiple filters
+
+```typescript
+export const searchUserPosts = query({
+  args: {
+    query: v.string(),
+    userId: v.string(),
+    category: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    let search = ctx.db
+      .query("posts")
+      .withSearchIndex("search_title", (q) => {
+        let builder = q.search("title", args.query).eq("authorId", args.userId);
+        if (args.category) {
+          builder = builder.eq("category", args.category);
+        }
+        return builder;
+      });
+
+    return await search.take(50);
+  },
+});
+```
+
+### Search across multiple fields
+
+Create separate indexes for different fields and combine results:
+
+```typescript
+export const searchEverywhere = query({
+  args: { query: v.string() },
+  handler: async (ctx, args) => {
+    // Search in titles
+    const titleResults = await ctx.db
+      .query("posts")
+      .withSearchIndex("search_title", (q) => q.search("title", args.query))
+      .take(10);
+
+    // Search in body
+    const bodyResults = await ctx.db
+      .query("posts")
+      .withSearchIndex("search_body", (q) => q.search("body", args.query))
+      .take(10);
+
+    // Combine and deduplicate results
+    const allResults = [...titleResults];
+    const seenIds = new Set(titleResults.map((p) => p._id));
+
+    for (const post of bodyResults) {
+      if (!seenIds.has(post._id)) {
+        allResults.push(post);
+        seenIds.add(post._id);
+      }
+    }
+
+    return allResults;
+  },
+});
+```
+
+### Empty search query
+
+Return all documents (filtered) when search query is empty:
+
+```typescript
+export const searchOrList = query({
+  args: {
+    query: v.string(),
+    category: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    if (args.query.trim() === "") {
+      // No search query - use regular index
+      let q = ctx.db.query("posts");
+      if (args.category) {
+        q = q.withIndex("by_category", (q) => q.eq("category", args.category));
+      }
+      return await q.order("desc").take(50);
+    }
+
+    // Has search query - use search index
+    let search = ctx.db
+      .query("posts")
+      .withSearchIndex("search_title", (q) => {
+        let builder = q.search("title", args.query);
+        if (args.category) {
+          builder = builder.eq("category", args.category);
+        }
+        return builder;
+      });
+
+    return await search.take(50);
+  },
+});
+```
+
+## Search best practices
+
+- **Define indexes in schema** - Search indexes must be defined in `convex/schema.ts` before use.
+- **Limit results with `.take()`** - Don't use `.collect()` on search queries, as result sets can be large.
+- **Use filter fields** - Add `filterFields` to search indexes for common filters like category or author.
+- **Consider multiple indexes** - Create separate search indexes for different fields (title, body, etc.).
+- **Results are already ordered** - Search results come in relevance order, don't apply additional `.order()`.
+- **Prefer search over `.filter()` for text** - Full-text search is much more efficient than filtering with string contains.
+- **Handle empty queries** - Decide whether empty search strings should return all results or none.
+
+## Limitations
+
+- **One search per query** - You can only use `.withSearchIndex()` once per query. To search multiple fields, run separate queries and combine results.
+- **Equality filters only** - Search indexes only support `.eq()` filters, not range queries or other comparisons.
+- **No ordering** - Results are always in relevance order. You cannot apply `.order()` to search results.
+- **Filter fields must be in index** - You can only filter on fields listed in the index's `filterFields` array.
+
+## When to use search vs regular indexes
+
+Use **search indexes** when:
+- Searching for words or phrases in text content
+- You want relevance-ranked results
+- Users type free-form search queries
+
+Use **regular indexes** when:
+- Filtering by exact values (IDs, enums, booleans)
+- Range queries (dates, numbers)
+- You need specific ordering (newest first, alphabetical)
+- Querying structured data, not text content

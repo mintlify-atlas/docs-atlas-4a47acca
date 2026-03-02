@@ -1,0 +1,259 @@
+---
+title: Database configuration
+description: Configure database persistence and storage for self-hosted Convex
+---
+
+When running a self-hosted Convex backend, you can configure database persistence and storage options. This document covers the available configuration for the local backend binary.
+
+## Database drivers
+
+Convex supports multiple database drivers for persistence:
+
+### SQLite (default)
+
+File-based database suitable for development and small deployments:
+
+```bash
+convex-local-backend \
+  --db sqlite \
+  --db-spec convex_local_backend.sqlite3
+```
+
+<ParamField path="--db" type="string" default="sqlite">
+  Database driver type.
+  
+  **Choices:** `sqlite`, `postgres`
+</ParamField>
+
+<ParamField path="--db-spec" type="string" default="convex_local_backend.sqlite3">
+  Database connection specification.
+  
+  - For SQLite: File path to the database file
+  - For Postgres: Server URL (e.g., `postgresql://user:pass@host:port/db`)
+</ParamField>
+
+### PostgreSQL
+
+For production deployments requiring scalability:
+
+```bash
+convex-local-backend \
+  --db postgres \
+  --db-spec "postgresql://user:password@localhost:5432/convex_db"
+```
+
+## Network configuration
+
+<ParamField path="--interface" type="string" default="0.0.0.0">
+  Host interface to bind to.
+  
+  Use `0.0.0.0` to listen on all interfaces, or `127.0.0.1` for localhost only.
+</ParamField>
+
+<ParamField path="--port" type="number" default={3210}>
+  Port for the main backend API.
+  
+  This is the port clients connect to for queries, mutations, and subscriptions.
+</ParamField>
+
+<ParamField path="--site-proxy-port" type="number" default={3211}>
+  Port for Convex HTTP Actions.
+  
+  This port serves HTTP endpoints defined in your Convex functions.
+</ParamField>
+
+## Public URLs
+
+When deploying behind a reverse proxy or load balancer, configure the public-facing URLs:
+
+<ParamField path="--convex-origin" type="string">
+  Public origin of the Convex server, as accessible from clients.
+  
+  Examples:
+  - Local: `http://127.0.0.1:3210`
+  - Production: `https://api.my-app.com`
+  
+  The port in this URL may differ from `--port` if behind a proxy.
+  
+  Requires `--convex-site`.
+</ParamField>
+
+<ParamField path="--convex-site" type="string">
+  Public origin for Convex HTTP Actions, as accessible from clients.
+  
+  Examples:
+  - Local: `http://127.0.0.1:3211`
+  - Production: `https://my-app.com`
+  - Shared domain: `https://api.my-app.com/http`
+  
+  The port in this URL may differ from `--site-proxy-port` if behind a proxy.
+  
+  Requires `--convex-origin`.
+</ParamField>
+
+## Storage configuration
+
+### Local file storage (default)
+
+Store files on the local filesystem:
+
+```bash
+convex-local-backend --local-storage ./convex_local_storage
+```
+
+<ParamField path="--local-storage" type="string" default="convex_local_storage">
+  Directory path for local file storage.
+  
+  Files uploaded via the storage API are stored here.
+</ParamField>
+
+### S3 storage
+
+Store files in Amazon S3 or S3-compatible storage:
+
+```bash
+convex-local-backend --s3-storage
+```
+
+<ParamField path="--s3-storage" type="boolean" default={false}>
+  Use S3 for file storage instead of local filesystem.
+  
+  Requires appropriate AWS credentials in environment variables:
+  - `AWS_ACCESS_KEY_ID`
+  - `AWS_SECRET_ACCESS_KEY`
+  - `AWS_REGION`
+  - `S3_BUCKET_NAME`
+</ParamField>
+
+## Security configuration
+
+<ParamField path="--instance-name" type="string">
+  Instance name for this backend.
+  
+  Used for key verification and multi-tenancy.
+  
+  Requires `--instance-secret`.
+</ParamField>
+
+<ParamField path="--instance-secret" type="string">
+  Instance secret for this backend.
+  
+  Used to sign and verify admin keys and tokens.
+  
+  Requires `--instance-name`.
+  
+  **Keep this secret secure!** Anyone with access to it can perform admin operations.
+</ParamField>
+
+<ParamField path="--do-not-require-ssl" type="boolean" default={false}>
+  Allow database connections without SSL.
+  
+  Only use in development/testing. Production deployments should always use SSL.
+</ParamField>
+
+<ParamField path="--redact-logs-to-client" type="boolean" default={false}>
+  Redact logs and error details sent to clients.
+  
+  Recommended for production to prevent information leakage.
+  
+  In development, it can be helpful to see full error details for debugging.
+</ParamField>
+
+## HTTP proxy
+
+<ParamField path="--convex-http-proxy" type="string">
+  Proxy URL for HTTP Actions fetch requests.
+  
+  Example: `http://proxy.example.com:8080`
+  
+  Useful for SSRF protection or monitoring outbound requests from Actions.
+</ParamField>
+
+## Monitoring and logging
+
+<ParamField path="--local-log-sink" type="string">
+  Path to a local file for log output.
+  
+  Useful for testing log integrations (e.g., Axiom, Datadog) locally.
+</ParamField>
+
+<ParamField path="--disable-beacon" type="boolean" default={false}>
+  Disable telemetry beacon to Convex servers.
+  
+  Can also be set via `DISABLE_BEACON` environment variable.
+  
+  The beacon helps Convex understand self-hosted usage to improve the product.
+</ParamField>
+
+<ParamField path="--sentry-identifier" type="string">
+  Identifier attached to Sentry events.
+  
+  Sentry is disabled by default. This is only used if Sentry integration is enabled.
+</ParamField>
+
+## Complete example
+
+### Development setup
+
+```bash
+convex-local-backend \
+  --db sqlite \
+  --db-spec ./dev.sqlite3 \
+  --interface 127.0.0.1 \
+  --port 3210 \
+  --site-proxy-port 3211 \
+  --local-storage ./storage
+```
+
+### Production setup
+
+```bash
+convex-local-backend \
+  --db postgres \
+  --db-spec "postgresql://user:pass@db.internal:5432/convex" \
+  --interface 0.0.0.0 \
+  --port 3210 \
+  --site-proxy-port 3211 \
+  --convex-origin "https://api.myapp.com" \
+  --convex-site "https://myapp.com" \
+  --s3-storage \
+  --instance-name "production" \
+  --instance-secret "$INSTANCE_SECRET" \
+  --redact-logs-to-client \
+  --disable-beacon
+```
+
+## Docker example
+
+```dockerfile
+FROM convex/convex-local-backend:latest
+
+EXPOSE 3210 3211
+
+CMD ["convex-local-backend", \
+     "--db", "postgres", \
+     "--db-spec", "postgresql://postgres:password@db:5432/convex", \
+     "--interface", "0.0.0.0", \
+     "--port", "3210", \
+     "--site-proxy-port", "3211", \
+     "--s3-storage", \
+     "--redact-logs-to-client"]
+```
+
+## Environment variables
+
+Some options can be set via environment variables:
+
+- `DISABLE_BEACON` - Disable telemetry (same as `--disable-beacon`)
+- `AWS_ACCESS_KEY_ID` - AWS credentials for S3 storage
+- `AWS_SECRET_ACCESS_KEY` - AWS credentials for S3 storage
+- `AWS_REGION` - AWS region for S3 storage
+
+## Best practices
+
+1. **Use PostgreSQL in production** - SQLite is suitable for development only
+2. **Enable SSL** - Always use SSL for database connections in production
+3. **Redact logs** - Set `--redact-logs-to-client` in production
+4. **Secure instance secret** - Store `--instance-secret` securely (e.g., in a secrets manager)
+5. **Use S3 for file storage** - Local storage doesn't scale across multiple backend instances
+6. **Configure proper origins** - Set `--convex-origin` and `--convex-site` for client accessibility

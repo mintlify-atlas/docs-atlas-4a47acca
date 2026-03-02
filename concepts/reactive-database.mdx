@@ -1,0 +1,296 @@
+---
+title: Reactive database
+description: Understand Convex's reactive database model and how real-time synchronization keeps your UI in sync
+---
+
+Convex provides a reactive database that automatically keeps your application's UI in sync with your backend data. When data changes in the database, all queries that depend on that data automatically re-run and update connected clients in real-time.
+
+## How reactivity works
+
+The reactive database model in Convex is built on three core principles:
+
+1. **Automatic dependency tracking** - When you run a query, Convex tracks which documents and indexes your query reads
+2. **Change detection** - When a mutation modifies data, Convex identifies which queries are affected
+3. **Automatic re-execution** - Affected queries automatically re-run and push updates to subscribed clients
+
+This means you write simple, declarative queries and Convex handles all the complexity of keeping data synchronized.
+
+## Reading from the database
+
+The database reader interface (`ctx.db`) provides two primary entry points:
+
+### Fetching by ID
+
+Use `db.get()` to fetch a single document by its ID:
+
+```typescript
+import { query } from "./_generated/server";
+import { v } from "convex/values";
+
+export const getUser = query({
+  args: { userId: v.id("users") },
+  handler: async (ctx, args) => {
+    const user = await ctx.db.get(args.userId);
+    // Returns the document or null if it doesn't exist
+    return user;
+  },
+});
+```
+
+### Querying multiple documents
+
+Use `db.query()` to build more complex queries:
+
+```typescript
+import { query } from "./_generated/server";
+import { v } from "convex/values";
+
+export const listMessages = query({
+  args: { channelId: v.id("channels") },
+  handler: async (ctx, args) => {
+    const messages = await ctx.db
+      .query("messages")
+      .withIndex("by_channel", (q) => q.eq("channelId", args.channelId))
+      .order("desc")
+      .take(50);
+    return messages;
+  },
+});
+```
+
+<Note>
+Always prefer `.withIndex()` over `.filter()` for better performance. Indexes allow Convex to efficiently find matching documents, while filters must scan all documents.
+</Note>
+
+## Writing to the database
+
+Mutations provide a database writer interface (`ctx.db`) with four write operations:
+
+### Insert
+
+Add new documents to a table:
+
+```typescript
+import { mutation } from "./_generated/server";
+import { v } from "convex/values";
+
+export const createTask = mutation({
+  args: { text: v.string() },
+  handler: async (ctx, args) => {
+    const taskId = await ctx.db.insert("tasks", {
+      text: args.text,
+      completed: false,
+    });
+    return taskId;
+  },
+});
+```
+
+System fields (`_id` and `_creationTime`) are added automatically.
+
+### Patch
+
+Shallow merge updates into an existing document:
+
+```typescript
+export const toggleTask = mutation({
+  args: { taskId: v.id("tasks") },
+  handler: async (ctx, args) => {
+    const task = await ctx.db.get(args.taskId);
+    if (!task) throw new Error("Task not found");
+    
+    await ctx.db.patch(args.taskId, {
+      completed: !task.completed,
+    });
+  },
+});
+```
+
+Fields not specified remain unchanged. Set fields to `undefined` to remove them.
+
+### Replace
+
+Completely replace a document (except system fields):
+
+```typescript
+export const updateUser = mutation({
+  args: {
+    userId: v.id("users"),
+    name: v.string(),
+    email: v.string(),
+  },
+  handler: async (ctx, args) => {
+    await ctx.db.replace(args.userId, {
+      name: args.name,
+      email: args.email,
+    });
+  },
+});
+```
+
+### Delete
+
+Remove a document from the database:
+
+```typescript
+export const deleteTask = mutation({
+  args: { taskId: v.id("tasks") },
+  handler: async (ctx, args) => {
+    await ctx.db.delete(args.taskId);
+  },
+});
+```
+
+## Transactional guarantees
+
+All reads and writes within a single query or mutation are **atomic and isolated**:
+
+- **Queries** see a consistent snapshot of the database at a single point in time
+- **Mutations** execute all writes atomically - either all succeed or all fail
+- No partial states or race conditions - you never see inconsistent data
+
+```typescript
+export const transferFunds = mutation({
+  args: {
+    fromAccount: v.id("accounts"),
+    toAccount: v.id("accounts"),
+    amount: v.number(),
+  },
+  handler: async (ctx, args) => {
+    const from = await ctx.db.get(args.fromAccount);
+    const to = await ctx.db.get(args.toAccount);
+    
+    if (!from || !to) throw new Error("Account not found");
+    if (from.balance < args.amount) throw new Error("Insufficient funds");
+    
+    // Both updates happen atomically
+    await ctx.db.patch(args.fromAccount, {
+      balance: from.balance - args.amount,
+    });
+    await ctx.db.patch(args.toAccount, {
+      balance: to.balance + args.amount,
+    });
+  },
+});
+```
+
+If any operation throws an error, all changes are automatically rolled back.
+
+## System tables
+
+Convex provides read-only access to system tables through `ctx.db.system`:
+
+```typescript
+export const getFileMetadata = query({
+  args: { storageId: v.id("_storage") },
+  handler: async (ctx, args) => {
+    const metadata = await ctx.db.system.get(args.storageId);
+    // Returns: { _id, _creationTime, contentType, sha256, size }
+    return metadata;
+  },
+});
+```
+
+System tables include:
+- `_storage` - File metadata for stored files
+- `_scheduled_functions` - State of scheduled functions
+
+## Query patterns
+
+The database reader supports several patterns for consuming query results:
+
+<CodeGroup>
+```typescript Collect all results
+// Warning: loads all results into memory
+const allTasks = await ctx.db
+  .query("tasks")
+  .withIndex("by_user", (q) => q.eq("userId", userId))
+  .collect();
+```
+
+```typescript Take first N results
+const recentMessages = await ctx.db
+  .query("messages")
+  .order("desc")
+  .take(20);
+```
+
+```typescript Get first result
+const user = await ctx.db
+  .query("users")
+  .withIndex("by_email", (q) => q.eq("email", email))
+  .first();
+```
+
+```typescript Get unique result
+// Throws if more than one result matches
+const user = await ctx.db
+  .query("users")
+  .withIndex("by_email", (q) => q.eq("email", email))
+  .unique();
+```
+
+```typescript Async iteration
+// Process results without loading all into memory
+for await (const task of ctx.db.query("tasks")) {
+  // Process each task
+}
+```
+</CodeGroup>
+
+<Warning>
+`.collect()` loads **all** matching documents into memory. Only use it when the result set is tightly bounded. For large or unbounded result sets, prefer `.take(n)`, `.first()`, `.unique()`, or pagination.
+</Warning>
+
+## Optimistic concurrency control
+
+Convex uses optimistic concurrency control (OCC) for mutations. If a mutation reads data that was modified by another concurrent mutation, Convex automatically retries the mutation with fresh data.
+
+You don't need to handle this explicitly - Convex manages retries transparently. Just write your mutation logic as if it runs alone:
+
+```typescript
+export const incrementCounter = mutation({
+  args: { counterId: v.id("counters") },
+  handler: async (ctx, args) => {
+    const counter = await ctx.db.get(args.counterId);
+    if (!counter) throw new Error("Counter not found");
+    
+    // If another mutation modifies this counter concurrently,
+    // Convex automatically retries this entire function
+    await ctx.db.patch(args.counterId, {
+      value: counter.value + 1,
+    });
+  },
+});
+```
+
+## Real-time updates
+
+When you use queries in your client application with React hooks like `useQuery`, the results automatically update when underlying data changes:
+
+```typescript
+// In your React component
+import { useQuery } from "convex/react";
+import { api } from "./_generated/api";
+
+function TaskList({ userId }) {
+  // Automatically re-renders when tasks change
+  const tasks = useQuery(api.tasks.list, { userId });
+  
+  return (
+    <ul>
+      {tasks?.map(task => (
+        <li key={task._id}>{task.text}</li>
+      ))}
+    </ul>
+  );
+}
+```
+
+Convex tracks dependencies and pushes updates efficiently, typically within **50-100ms** of the data changing.
+
+## Next steps
+
+- Learn about [Functions](/concepts/functions) to understand queries, mutations, and actions
+- Define [Schemas](/concepts/schemas) to validate your data and get TypeScript types
+- Explore [Real-time sync](/concepts/real-time-sync) to understand the synchronization protocol

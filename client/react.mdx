@@ -1,0 +1,441 @@
+---
+title: React client
+description: React hooks and components for building reactive Convex applications
+---
+
+The Convex React library provides hooks and components for building reactive applications with real-time data synchronization.
+
+## Installation
+
+<CodeGroup>
+```bash npm
+npm install convex react
+```
+
+```bash yarn
+yarn add convex react
+```
+
+```bash pnpm
+pnpm add convex react
+```
+</CodeGroup>
+
+## Setup
+
+### Creating the client
+
+```typescript
+import { ConvexReactClient } from "convex/react";
+
+const convex = new ConvexReactClient(process.env.NEXT_PUBLIC_CONVEX_URL!);
+```
+
+### Providing the client
+
+Wrap your app with `ConvexProvider`:
+
+```tsx
+import { ConvexProvider } from "convex/react";
+
+function App() {
+  return (
+    <ConvexProvider client={convex}>
+      <YourApp />
+    </ConvexProvider>
+  );
+}
+```
+
+## Hooks
+
+### useQuery
+
+Load reactive query data that automatically updates:
+
+```typescript
+function useQuery<Query extends FunctionReference<"query">>(
+  query: Query,
+  args: Query["_args"] | "skip"
+): Query["_returnType"] | undefined
+```
+
+**Basic usage:**
+
+```tsx
+import { useQuery } from "convex/react";
+import { api } from "../convex/_generated/api";
+
+function TaskList() {
+  const tasks = useQuery(api.tasks.list, { completed: false });
+
+  if (tasks === undefined) return <div>Loading...</div>;
+
+  return tasks.map((task) => (
+    <div key={task._id}>{task.text}</div>
+  ));
+}
+```
+
+**Conditional queries:**
+
+Pass `"skip"` to conditionally disable a query:
+
+```tsx
+function MaybeProfile({ userId }: { userId?: Id<"users"> }) {
+  const profile = useQuery(
+    api.users.get,
+    userId ? { userId } : "skip"
+  );
+  // ...
+}
+```
+
+### useMutation
+
+Get a function to execute mutations:
+
+```typescript
+function useMutation<Mutation extends FunctionReference<"mutation">>(
+  mutation: Mutation
+): ReactMutation<Mutation>
+```
+
+**Basic usage:**
+
+```tsx
+import { useMutation } from "convex/react";
+import { api } from "../convex/_generated/api";
+
+function CreateTask() {
+  const createTask = useMutation(api.tasks.create);
+
+  const handleClick = async () => {
+    await createTask({ text: "New task" });
+  };
+
+  return <button onClick={handleClick}>Add Task</button>;
+}
+```
+
+**Optimistic updates:**
+
+```tsx
+const deleteTask = useMutation(api.tasks.delete)
+  .withOptimisticUpdate((localStore, args) => {
+    const tasks = localStore.getQuery(api.tasks.list, {});
+    if (tasks !== undefined) {
+      localStore.setQuery(
+        api.tasks.list,
+        {},
+        tasks.filter((task) => task._id !== args.taskId)
+      );
+    }
+  });
+```
+
+### useAction
+
+Get a function to execute actions:
+
+```typescript
+function useAction<Action extends FunctionReference<"action">>(
+  action: Action
+): ReactAction<Action>
+```
+
+**Basic usage:**
+
+```tsx
+import { useAction } from "convex/react";
+import { api } from "../convex/_generated/api";
+
+function GenerateSummary() {
+  const generate = useAction(api.ai.generateSummary);
+
+  const handleClick = async () => {
+    try {
+      const summary = await generate({ text: "Some long text..." });
+      console.log(summary);
+    } catch (error) {
+      console.error("Action failed:", error);
+    }
+  };
+
+  return <button onClick={handleClick}>Generate</button>;
+}
+```
+
+<Info>
+Calling actions directly from clients is often an anti-pattern. Consider having the client call a mutation that records the user's intent, then schedules the action via `ctx.scheduler.runAfter`.
+</Info>
+
+### usePaginatedQuery
+
+Load paginated data for infinite scroll UIs:
+
+```typescript
+function usePaginatedQuery<Query extends PaginatedQueryReference>(
+  query: Query,
+  args: PaginatedQueryArgs<Query> | "skip",
+  options: { initialNumItems: number }
+): UsePaginatedQueryResult<Item>
+```
+
+**Usage:**
+
+```tsx
+import { usePaginatedQuery } from "convex/react";
+import { api } from "../convex/_generated/api";
+
+function MessageList() {
+  const { results, status, loadMore } = usePaginatedQuery(
+    api.messages.list,
+    { channel: "#general" },
+    { initialNumItems: 20 }
+  );
+
+  return (
+    <div>
+      {results.map((msg) => <div key={msg._id}>{msg.text}</div>)}
+      {status === "CanLoadMore" && (
+        <button onClick={() => loadMore(10)}>Load More</button>
+      )}
+      {status === "LoadingMore" && <div>Loading...</div>}
+    </div>
+  );
+}
+```
+
+**Return value:**
+
+```typescript
+type UsePaginatedQueryResult<Item> = {
+  results: Item[];
+  loadMore: (numItems: number) => void;
+} & (
+  | { status: "LoadingFirstPage"; isLoading: true }
+  | { status: "CanLoadMore"; isLoading: false }
+  | { status: "LoadingMore"; isLoading: true }
+  | { status: "Exhausted"; isLoading: false }
+);
+```
+
+### useConvex
+
+Access the underlying `ConvexReactClient`:
+
+```typescript
+function useConvex(): ConvexReactClient
+```
+
+**Usage:**
+
+```tsx
+import { useConvex } from "convex/react";
+import { api } from "../convex/_generated/api";
+
+function MyComponent() {
+  const convex = useConvex();
+
+  const handleFetch = async () => {
+    // One-time query fetch
+    const result = await convex.query(api.tasks.list, {});
+  };
+
+  return <button onClick={handleFetch}>Fetch</button>;
+}
+```
+
+### useConvexConnectionState
+
+Monitor the WebSocket connection state:
+
+```typescript
+function useConvexConnectionState(): ConnectionState
+```
+
+**Usage:**
+
+```tsx
+import { useConvexConnectionState } from "convex/react";
+
+function ConnectionStatus() {
+  const state = useConvexConnectionState();
+
+  return (
+    <div>
+      {state.isConnected ? "Connected" : "Disconnected"}
+    </div>
+  );
+}
+```
+
+## Authentication components
+
+### Authenticated
+
+Renders children only when authenticated:
+
+```tsx
+import { Authenticated } from "convex/react";
+
+function App() {
+  return (
+    <Authenticated>
+      <Dashboard />
+    </Authenticated>
+  );
+}
+```
+
+### Unauthenticated
+
+Renders children only when not authenticated:
+
+```tsx
+import { Unauthenticated } from "convex/react";
+
+function App() {
+  return (
+    <Unauthenticated>
+      <LoginPage />
+    </Unauthenticated>
+  );
+}
+```
+
+### AuthLoading
+
+Renders children while authentication is loading:
+
+```tsx
+import { AuthLoading } from "convex/react";
+
+function App() {
+  return (
+    <AuthLoading>
+      <LoadingSpinner />
+    </AuthLoading>
+  );
+}
+```
+
+**Combined example:**
+
+```tsx
+import { Authenticated, Unauthenticated, AuthLoading } from "convex/react";
+
+function App() {
+  return (
+    <>
+      <AuthLoading>
+        <LoadingSpinner />
+      </AuthLoading>
+      <Authenticated>
+        <Dashboard />
+      </Authenticated>
+      <Unauthenticated>
+        <LoginPage />
+      </Unauthenticated>
+    </>
+  );
+}
+```
+
+## Authentication
+
+Set up authentication with an async token fetcher:
+
+```typescript
+convex.setAuth(
+  async () => {
+    // Return JWT token or null if unavailable
+    return await fetchAuthToken();
+  },
+  (isAuthenticated) => {
+    console.log("Auth changed:", isAuthenticated);
+  }
+);
+```
+
+Clear authentication:
+
+```typescript
+convex.clearAuth();
+```
+
+## Pagination helpers
+
+Helper functions for optimistic updates in paginated queries:
+
+### insertAtTop
+
+```typescript
+import { insertAtTop } from "convex/react";
+
+const createTask = useMutation(api.tasks.create)
+  .withOptimisticUpdate((localStore, args) => {
+    insertAtTop({
+      paginatedQuery: api.tasks.list,
+      argsToMatch: { listId: args.listId },
+      localQueryStore: localStore,
+      item: {
+        _id: crypto.randomUUID() as Id<"tasks">,
+        title: args.title,
+        completed: false
+      }
+    });
+  });
+```
+
+### insertAtPosition
+
+```typescript
+import { insertAtPosition } from "convex/react";
+
+const createTask = useMutation(api.tasks.create)
+  .withOptimisticUpdate((localStore, args) => {
+    insertAtPosition({
+      paginatedQuery: api.tasks.listByPriority,
+      argsToMatch: { listId: args.listId },
+      sortOrder: "asc",
+      sortKeyFromItem: (item) => [item.priority, item._creationTime],
+      localQueryStore: localStore,
+      item: {
+        _id: crypto.randomUUID() as Id<"tasks">,
+        _creationTime: Date.now(),
+        title: args.title,
+        priority: args.priority,
+        completed: false
+      }
+    });
+  });
+```
+
+## Best practices
+
+- Always use hooks inside React components or custom hooks
+- Handle the `undefined` loading state from `useQuery`
+- Use `"skip"` for conditional queries instead of conditional hooks
+- Wrap mutation/action calls in try-catch blocks
+- Use optimistic updates for better UX
+- The functions returned by `useMutation` and `useAction` are stable across renders
+- Don't pass React events directly to mutations - wrap them in handlers
+
+## Type safety
+
+All hooks are fully type-safe with generated API types:
+
+```tsx
+import { api } from "../convex/_generated/api";
+
+// Arguments and return types are automatically inferred
+const tasks = useQuery(api.tasks.list, {
+  completed: false // Type-checked
+});
+// tasks has type Task[] | undefined
+
+const createTask = useMutation(api.tasks.create);
+// createTask expects { text: string } and returns Promise<Id<"tasks">>
+```

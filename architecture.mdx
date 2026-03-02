@@ -1,0 +1,357 @@
+---
+title: Architecture
+description: High-level overview of Convex Backend architecture and components
+---
+
+Convex is designed as a reactive database with integrated server functions, providing a complete backend solution for modern web applications. This page provides an overview of the architecture and key components.
+
+## Overview
+
+Self-hosting Convex requires deploying three main services:
+
+1. **Convex backend** - The core database and function runtime
+2. **Convex dashboard** - Web UI for managing deployments
+3. **Your frontend app** - Hosted on your platform of choice (Vercel, Netlify, etc.)
+
+<Note>
+The Convex backend handles all database operations and server-side compute. It does not host your frontend application.
+</Note>
+
+## Core components
+
+### Convex backend
+
+The backend is the heart of Convex, written in Rust for performance and reliability. It provides:
+
+- **Database layer** - Stores and queries your data with strong consistency
+- **Function runtime** - Executes your TypeScript queries, mutations, and actions
+- **Sync engine** - Powers real-time reactivity and live updates
+- **HTTP server** - Serves API endpoints and handles client connections
+
+#### Key services
+
+<CardGroup cols={2}>
+  <Card title="Database API" icon="database">
+    Main API endpoint listening on port 3210 (default)
+  </Card>
+  <Card title="HTTP actions" icon="globe">
+    HTTP endpoints for your actions on port 3211 (default)
+  </Card>
+  <Card title="Function runtime" icon="code">
+    Isolated JavaScript environment for executing your TypeScript functions
+  </Card>
+  <Card title="Storage layer" icon="hard-drive">
+    Pluggable storage supporting SQLite, Postgres, MySQL, and S3
+  </Card>
+</CardGroup>
+
+### Dashboard
+
+The self-hosted dashboard provides a web interface for:
+
+- Viewing and editing data in your tables
+- Monitoring function executions and logs
+- Running ad-hoc queries and mutations
+- Managing deployments and configurations
+- Exploring your database schema
+
+The dashboard runs as a separate service (default port 6791) and connects to your backend using the admin key.
+
+### Client libraries
+
+Convex provides client libraries for various platforms:
+
+- **React** - Hooks for queries, mutations, and real-time updates
+- **Next.js** - Server and client components support
+- **Vue, Svelte** - Framework-specific integrations
+- **Node.js** - Server-side client for backend-to-backend communication
+
+## Repository structure
+
+The Convex backend repository is organized as follows:
+
+### Rust crates (`crates/`)
+
+The backend is primarily written in Rust, with code organized in crates:
+
+- **`local_backend/`** - Application server and serving edge
+- **`database/`** - Core database implementation
+- **`sync/`** - Real-time synchronization engine
+- **`vector/`** - Vector search capabilities
+- **`text_search/`** - Full-text search implementation
+- **`function_runner/`** - JavaScript function execution runtime
+- **`storage/`** - Storage abstraction layer
+
+### TypeScript packages (`npm-packages/`)
+
+TypeScript code for client libraries, CLI, and internal tooling:
+
+- **`convex/`** - Main client library published to npm
+- **`udf-runtime/`** - JavaScript environment for user-defined functions
+- **`system-udfs/`** - System functions used by the CLI and dashboard
+- **`dashboard/`** - Cloud-hosted dashboard
+- **`dashboard-self-hosted/`** - Self-hosted dashboard build
+- **`dashboard-common/`** - Shared dashboard code
+
+## Data flow
+
+<Steps>
+
+<Step title="Client initiates request">
+
+Your frontend application uses the Convex client library to call a query, mutation, or action.
+
+```typescript
+import { useQuery } from "convex/react";
+import { api } from "./convex/_generated/api";
+
+function MyComponent() {
+  const messages = useQuery(api.messages.list);
+  // Component automatically re-renders when data changes
+}
+```
+
+</Step>
+
+<Step title="Backend receives request">
+
+The backend's HTTP server receives the request and routes it to the appropriate handler based on the function type.
+
+</Step>
+
+<Step title="Function executes">
+
+The function runtime creates an isolated JavaScript environment and executes your TypeScript function with a context object that provides database access.
+
+```typescript
+import { query } from "./_generated/server";
+
+export const list = query({
+  args: {},
+  handler: async (ctx) => {
+    // Strong consistency - always reads the latest data
+    return await ctx.db.query("messages").collect();
+  },
+});
+```
+
+</Step>
+
+<Step title="Database operation">
+
+The backend performs the requested database operation (read, write, or both) with strong consistency guarantees.
+
+</Step>
+
+<Step title="Result returned">
+
+The function result is serialized and sent back to the client. For queries, the client automatically subscribes to changes.
+
+</Step>
+
+<Step title="Real-time updates">
+
+When data changes, the sync engine notifies all subscribed clients, triggering automatic re-renders in your UI.
+
+</Step>
+
+</Steps>
+
+## Function types
+
+Convex provides three types of functions, each with different characteristics:
+
+### Queries
+
+- **Read-only** - Cannot modify the database
+- **Cacheable** - Results can be cached and reused
+- **Reactive** - Client automatically subscribes to updates
+- **Transactional** - Reads are strongly consistent
+
+```typescript
+export const getMessage = query({
+  args: { id: v.id("messages") },
+  handler: async (ctx, args) => {
+    return await ctx.db.get(args.id);
+  },
+});
+```
+
+### Mutations
+
+- **Read-write** - Can read and modify the database
+- **Transactional** - ACID guarantees for all operations
+- **Consistent** - All reads within a mutation see a consistent snapshot
+- **Triggers reactivity** - Changes trigger query updates
+
+```typescript
+export const sendMessage = mutation({
+  args: { body: v.string() },
+  handler: async (ctx, args) => {
+    await ctx.db.insert("messages", { body: args.body });
+  },
+});
+```
+
+### Actions
+
+- **Side effects** - Can call external APIs and services
+- **Long-running** - Configurable timeout for extended operations
+- **Non-deterministic** - Can use randomness, current time, etc.
+- **Can call queries and mutations** - Orchestrate multiple database operations
+
+```typescript
+"use node";
+import { action } from "./_generated/server";
+
+export const sendEmail = action({
+  args: { email: v.string() },
+  handler: async (ctx, args) => {
+    // Call external API
+    await fetch("https://api.email-service.com/send", {
+      method: "POST",
+      body: JSON.stringify({ to: args.email }),
+    });
+    
+    // Record in database
+    await ctx.runMutation(api.emails.recordSent, { email: args.email });
+  },
+});
+```
+
+## Storage architecture
+
+Convex provides flexible storage options to suit different deployment scenarios:
+
+### SQLite (default)
+
+- **Best for**: Development, small deployments, single-server setups
+- **Location**: Local file in Docker volume or filesystem
+- **Performance**: Excellent for single-server workloads
+- **Scaling**: Vertical scaling only
+
+### Postgres
+
+- **Best for**: Production deployments requiring high availability
+- **Providers**: Neon, RDS, self-hosted
+- **Performance**: Excellent with proper co-location
+- **Scaling**: Managed service handles replication and backups
+
+### MySQL/Vitess
+
+- **Best for**: Teams already using MySQL infrastructure
+- **Providers**: PlanetScale, RDS MySQL, self-hosted
+- **Performance**: Comparable to Postgres
+- **Scaling**: Vitess provides horizontal scaling capabilities
+
+### S3 storage (optional)
+
+For larger deployments, you can offload certain data to S3:
+
+- **Exports** - Backup data exports
+- **Snapshots** - Point-in-time snapshots
+- **Modules** - Bundled function code
+- **Files** - User-uploaded files
+- **Search indexes** - Full-text and vector search indexes
+
+<Warning>
+Ensure your backend and database are in the same region. Network latency between the backend and database directly impacts query performance.
+</Warning>
+
+## Deployment considerations
+
+### Resource requirements
+
+The Convex backend is designed to run efficiently with modest resources:
+
+- **Minimum**: 512MB RAM, 1 CPU core
+- **Recommended**: 2GB+ RAM, 2+ CPU cores
+- **Storage**: Depends on your data size plus indexes
+
+### Scaling strategies
+
+<CardGroup cols={2}>
+  <Card title="Vertical scaling" icon="arrow-up">
+    Increase CPU and memory for the backend container
+  </Card>
+  <Card title="Database scaling" icon="database">
+    Use managed database services that handle replication and failover
+  </Card>
+  <Card title="Persistent storage" icon="hard-drive">
+    Configure cloud provider volumes for SQLite persistence
+  </Card>
+  <Card title="S3 offloading" icon="cloud">
+    Move large files and indexes to object storage
+  </Card>
+</CardGroup>
+
+### High availability
+
+For production deployments requiring high availability:
+
+1. Use managed Postgres or MySQL with automatic failover
+2. Deploy backend containers across multiple availability zones
+3. Configure load balancer health checks using `/version` endpoint
+4. Set up monitoring and alerting for backend and database
+5. Regular backups using `npx convex export`
+
+## Security considerations
+
+### Authentication
+
+Convex supports multiple authentication patterns:
+
+- **Convex Auth** - Built-in authentication system (requires manual setup for self-hosted)
+- **Third-party providers** - Clerk, WorkOS, Auth0, etc.
+- **Custom JWT** - Bring your own auth provider
+
+### Network security
+
+- Use HTTPS/TLS for all production deployments
+- Set `DO_NOT_REQUIRE_SSL=1` only for local development
+- Restrict dashboard access to trusted networks
+- Rotate admin keys periodically
+- Never commit `.env.local` to version control
+
+### Telemetry beacon
+
+<Note>
+Self-hosted builds include an optional beacon that sends minimal, anonymous usage data to help improve Convex. You can disable it with the `--disable-beacon` flag. The beacon only includes:
+- Random deployment identifier
+- Migration version
+- Git revision
+- Uptime
+</Note>
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card
+    title="Quickstart guide"
+    icon="rocket"
+    href="/quickstart"
+  >
+    Deploy your first self-hosted Convex instance
+  </Card>
+  <Card
+    title="Advanced configurations"
+    icon="sliders"
+    href="https://github.com/get-convex/convex-backend/tree/main/self-hosted/advanced"
+  >
+    Explore hosting options, database choices, and tuning
+  </Card>
+  <Card
+    title="Build from source"
+    icon="hammer"
+    href="https://github.com/get-convex/convex-backend/blob/main/BUILD.md"
+  >
+    Compile the Rust backend yourself
+  </Card>
+  <Card
+    title="Contributing"
+    icon="code-pull-request"
+    href="https://github.com/get-convex/convex-backend/blob/main/CONTRIBUTING.md"
+  >
+    Learn how to contribute to Convex
+  </Card>
+</CardGroup>

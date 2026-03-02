@@ -1,0 +1,225 @@
+---
+title: convex data
+description: List tables and print data from your database
+---
+
+The `convex data` command allows you to inspect your Convex deployment's database directly from the command line.
+
+## Usage
+
+```bash
+npx convex data [table] [options]
+```
+
+## Arguments
+
+<ParamField path="table" type="string">
+  If specified, list documents in this table. If omitted, lists all tables in the database.
+</ParamField>
+
+## Options
+
+<ParamField path="--limit" type="number" default={100}>
+  List only the `n` most recently created documents.
+  
+  Must be a positive integer.
+</ParamField>
+
+<ParamField path="--order" type="string" default="desc">
+  Order the documents by their `_creationTime`.
+  
+  **Choices:** `asc`, `desc`
+  
+  - `asc` - Oldest documents first
+  - `desc` - Newest documents first
+</ParamField>
+
+<ParamField path="--component" type="string">
+  Path to the component in the component tree defined in `convex.config.ts`.
+  
+  Components are a beta feature.
+</ParamField>
+
+<ParamField path="--format" type="string">
+  Format to print the data in.
+  
+  **Choices:** `jsonArray`, `json`, `jsonLines`, `jsonl`, `pretty`
+  
+  - `jsonArray` (or `json`) - Print the data as a JSON array of objects
+  - `jsonLines` (or `jsonl`) - Print the data as a JSON object per line
+  - `pretty` - Print the data in a human-readable format (default for terminal output)
+</ParamField>
+
+## Examples
+
+### List all tables
+
+List all tables in your deployment:
+
+```bash
+npx convex data
+```
+
+Output:
+```
+messages
+users
+posts
+comments
+```
+
+### List documents in a table
+
+View the most recent documents in the `users` table:
+
+```bash
+npx convex data users
+```
+
+### Limit results
+
+Show only the 10 most recent documents:
+
+```bash
+npx convex data messages --limit 10
+```
+
+### Show oldest documents
+
+List documents in ascending order by creation time:
+
+```bash
+npx convex data posts --order asc --limit 5
+```
+
+### Export as JSON
+
+Output data in JSON format for processing:
+
+```bash
+npx convex data users --format json > users.json
+```
+
+### Export as JSON Lines
+
+Output data as JSON Lines for streaming or line-by-line processing:
+
+```bash
+npx convex data messages --format jsonLines
+```
+
+### Query production data
+
+List tables in your production deployment:
+
+```bash
+npx convex data --prod
+```
+
+### Query component data
+
+List documents from a table in a component:
+
+```bash
+npx convex data events --component auth/sessions
+```
+
+## Output formats
+
+### Pretty format (default)
+
+Human-readable table format:
+
+```
+┌────────────────┬──────────┬─────────────────────┐
+│ _id            │ name     │ email               │
+├────────────────┼──────────┼─────────────────────┤
+│ j7896d5k3l2m1n │ Alice    │ alice@example.com   │
+│ k8907e6l4m3n2o │ Bob      │ bob@example.com     │
+└────────────────┴──────────┴─────────────────────┘
+```
+
+### JSON Array format
+
+```json
+[
+  {
+    "_id": "j7896d5k3l2m1n",
+    "_creationTime": 1678901234567,
+    "name": "Alice",
+    "email": "alice@example.com"
+  },
+  {
+    "_id": "k8907e6l4m3n2o",
+    "_creationTime": 1678901234890,
+    "name": "Bob",
+    "email": "bob@example.com"
+  }
+]
+```
+
+### JSON Lines format
+
+```jsonl
+{"_id":"j7896d5k3l2m1n","_creationTime":1678901234567,"name":"Alice","email":"alice@example.com"}
+{"_id":"k8907e6l4m3n2o","_creationTime":1678901234890,"name":"Bob","email":"bob@example.com"}
+```
+
+## Deployment selection
+
+The `convex data` command supports deployment selection:
+
+- `--prod` - Target production deployment
+- `--preview-name <name>` - Target a preview deployment
+- `--url <url>` - Target a specific deployment URL
+- `--admin-key <key>` - Admin key for authentication
+
+By default, the command targets your dev deployment.
+
+## System fields
+
+All documents include these system fields:
+
+- `_id` - Unique document identifier
+- `_creationTime` - Timestamp when the document was created (milliseconds since epoch)
+
+## Use cases
+
+### Debugging
+
+Quickly inspect data during development:
+
+```bash
+npx convex data users --limit 5
+```
+
+### Data export
+
+Export data for analysis or backup:
+
+```bash
+npx convex data messages --format json --limit 1000 > messages.json
+```
+
+### Schema verification
+
+Check what tables exist in your deployment:
+
+```bash
+npx convex data
+```
+
+### Production monitoring
+
+Quickly check recent data in production:
+
+```bash
+npx convex data errors --prod --limit 10 --order desc
+```
+
+## Limitations
+
+- Maximum limit is bounded by deployment limits
+- Large datasets should use the export command instead
+- Does not support filtering beyond creation time ordering
+- For complex queries, use `convex run` to execute custom query functions

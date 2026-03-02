@@ -1,0 +1,157 @@
+---
+title: convex dev
+description: Develop against a dev deployment, watching for changes
+---
+
+The `convex dev` command starts a development workflow that watches for file changes, updates generated types, and pushes code to your configured dev deployment.
+
+## Usage
+
+```bash
+npx convex dev [options]
+```
+
+## Workflow
+
+When you run `convex dev`, it:
+
+1. Configures a new or existing project (if needed)
+2. Updates generated types and pushes code to the configured dev deployment
+3. Runs the provided command (if `--run` or `--run-sh` is used)
+4. Watches for file changes and repeats step 2
+
+## Options
+
+<ParamField path="-v, --verbose" type="boolean">
+  Show full listing of changes and detailed output.
+</ParamField>
+
+<ParamField path="--typecheck" type="string" default="try">
+  Check TypeScript files with `tsc --noEmit`.
+  
+  **Choices:** `enable`, `try`, `disable`
+  
+  - `enable` - Always run typechecking, fail if errors found
+  - `try` - Run typechecking but don't fail on errors
+  - `disable` - Skip typechecking entirely
+</ParamField>
+
+<ParamField path="--typecheck-components" type="boolean" default={false}>
+  Check TypeScript files within component implementations with `tsc --noEmit`.
+</ParamField>
+
+<ParamField path="--codegen" type="string" default="enable">
+  Regenerate code in `convex/_generated/`.
+  
+  **Choices:** `enable`, `disable`
+</ParamField>
+
+<ParamField path="--once" type="boolean" default={false}>
+  Execute only the first 3 steps, stop on any failure. Useful for CI/CD pipelines.
+</ParamField>
+
+<ParamField path="--until-success" type="boolean" default={false}>
+  Execute only the first 3 steps. On failure, watch for local and remote changes and retry steps 2 and 3.
+</ParamField>
+
+<ParamField path="--run" type="string">
+  The identifier of a Convex function to run after successful push.
+  
+  Example: `api.init.createData` or `myDir/myFile:myFunction`
+  
+  Conflicts with `--run-sh`.
+</ParamField>
+
+<ParamField path="--run-component" type="string">
+  If `--run` is used and the function is in a component, the path to the component tree defined in `convex.config.ts`.
+  
+  Components are a beta feature. This flag may change in subsequent releases.
+</ParamField>
+
+<ParamField path="--run-sh" type="string">
+  A shell command to run after successful push.
+  
+  Example: `node myScript.js`
+  
+  If you just want to run a Convex function, use `--run` instead.
+  
+  Conflicts with `--run`.
+</ParamField>
+
+<ParamField path="--tail-logs" type="string" default="pause-on-deploy">
+  Choose whether to tail Convex function logs in this terminal.
+  
+  **Choices:** `always`, `pause-on-deploy`, `disable`
+</ParamField>
+
+<ParamField path="--configure" type="string">
+  Ignore existing configuration and configure new or existing project.
+  
+  **Choices:** `new`, `existing`
+  
+  Can be used with `--team`, `--project`, and `--dev-deployment` for non-interactive configuration.
+</ParamField>
+
+## Examples
+
+### Basic development
+
+Start development with default settings:
+
+```bash
+npx convex dev
+```
+
+### Run a function after each push
+
+Execute a seed function after each successful deployment:
+
+```bash
+npx convex dev --run api.seed.seedDatabase
+```
+
+### Run a shell command
+
+Start your frontend dev server after Convex is ready:
+
+```bash
+npx convex dev --run-sh "npm run dev"
+```
+
+### One-time push for CI/CD
+
+Push code once without watching (useful in CI pipelines):
+
+```bash
+npx convex dev --once
+```
+
+### Disable typechecking
+
+Skip TypeScript checks for faster iteration:
+
+```bash
+npx convex dev --typecheck disable
+```
+
+### Develop against production
+
+Develop live against your production deployment (use with caution):
+
+```bash
+npx convex dev --prod
+```
+
+## Configuration
+
+The `convex dev` command reads configuration from:
+
+- `convex.json` - Project configuration file
+- Environment variables - `CONVEX_DEPLOYMENT`, `CONVEX_URL`, etc.
+- `.env.local` - Local environment variables (overridden by `--env-file`)
+
+## Exit codes
+
+- `0` - Success
+- `1` - Error occurred
+- `-2` - Process interrupted (SIGINT)
